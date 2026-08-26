@@ -1,0 +1,64 @@
+name: Extracción Diaria SIMIT y Validación de Comparendos
+
+on:
+  schedule:
+    # Ejecutar todos los días a las 6:00 AM hora Colombia (11:00 AM UTC)
+    - cron: '0 11 * * *'
+  workflow_dispatch:
+    inputs:
+      criterio:
+        description: 'NIT o Placa específica a consultar (dejar vacío para procesar toda la flota)'
+        required: false
+        default: ''
+        type: string
+      tipo_consulta:
+        description: 'Tipo de consulta'
+        required: true
+        default: 'NIT'
+        type: choice
+        options:
+          - 'NIT'
+          - 'PLACA'
+
+jobs:
+  extraccion_simit:
+    name: Agente Extractor SIMIT (Playwright Headless)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 1. Descargar repositorio de código
+        uses: actions/checkout@v4
+
+      - name: 2. Configurar entorno Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 3. Instalar dependencias del proyecto
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 4. Instalar navegador Chromium para Playwright
+        run: |
+          playwright install --with-deps chromium
+
+      - name: 5. Ejecutar Agente Extractor SIMIT
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_SCHEMA: ${{ secrets.DB_SCHEMA || 'comparendos_fscr' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          if [ -n "${{ inputs.criterio }}" ]; then
+            echo ">>> Ejecutando consulta específica para ${{ inputs.tipo_consulta }}: ${{ inputs.criterio }}..."
+            python -c "
+          from agente_extraccion_simit.extractor_principal import ejecutar_extraccion
+          ejecutar_extraccion('${{ inputs.criterio }}', '${{ inputs.tipo_consulta }}', sin_interfaz=True)
+          "
+          else
+            echo ">>> Ejecutando extracción automática para toda la flota corporativa..."
+            python agente_extraccion_simit/extractor_lote.py
+          fi
