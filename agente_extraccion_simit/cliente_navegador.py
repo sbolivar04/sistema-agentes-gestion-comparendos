@@ -65,11 +65,23 @@ class ClienteNavegadorSimit:
         async with async_playwright() as p:
             try:
                 browser = await self._launch_browser(p)
-                # no_viewport=True permite usar todo el tamaño real de la pantalla maximizada
-                context = await browser.new_context(
-                    no_viewport=True,
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-                )
+                context_kwargs = {
+                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+                    "locale": "es-CO",
+                    "timezone_id": "America/Bogota",
+                    "extra_http_headers": {
+                        "Accept-Language": "es-CO,es;q=0.9,en-US;q=0.8,en;q=0.7",
+                        "Sec-Ch-Ua": '"Not)A;Brand";v="99", "Google Chrome";v="127", "Chromium";v="127"',
+                        "Sec-Ch-Ua-Mobile": "?0",
+                        "Sec-Ch-Ua-Platform": '"Windows"'
+                    }
+                }
+                if not self.headless:
+                    context_kwargs["no_viewport"] = True
+                else:
+                    context_kwargs["viewport"] = {"width": 1920, "height": 1080}
+
+                context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
 
                 # ---- OPCIÓN 1: INTERCEPTAR TRÁFICO DE RED (API SIMIT) ----
@@ -87,13 +99,13 @@ class ClienteNavegadorSimit:
                 
                 page.on("response", handle_response)
 
-                # 1. Cargar portal oficial de SIMIT completamente (esperar networkidle)
-                logger.info("Cargando portal SIMIT completamente...")
+                # 1. Cargar portal oficial de SIMIT completamente (esperar domcontentloaded)
+                logger.info("Cargando portal SIMIT...")
                 max_intentos_carga = 3
                 for intento_carga in range(1, max_intentos_carga + 1):
                     try:
-                        await page.goto(self.simit_url, wait_until="networkidle", timeout=60000)
-                        logger.info("Página inicial de SIMIT cargada 100% en el navegador.")
+                        await page.goto(self.simit_url, wait_until="domcontentloaded", timeout=45000)
+                        logger.info("Página inicial de SIMIT cargada exitosamente.")
                         break
                     except Exception as e:
                         if intento_carga < max_intentos_carga:
@@ -103,8 +115,8 @@ class ClienteNavegadorSimit:
                             logger.error(f"Fallo definitivo al cargar SIMIT tras {max_intentos_carga} intentos.")
                             raise e
 
-                # Pausa para asegurar renderizado visual de la portada
-                await page.wait_for_timeout(2000)
+                # Pausa breve para asegurar renderizado visual de la portada
+                await page.wait_for_timeout(2500)
 
                 # 2. Cerrar modales iniciales si interrumpe la pantalla
                 try:
@@ -126,10 +138,10 @@ class ClienteNavegadorSimit:
                     logger.info(f"[Intento {intento}/{max_intentos}] Ingresando criterio '{criterio_clean}' en el buscador SIMIT...")
                     
                     try:
-                        await page.wait_for_selector(input_selector, state="visible", timeout=15000)
+                        await page.wait_for_selector(input_selector, state="visible", timeout=20000)
                     except Exception:
                         logger.warning(f"[Intento {intento}] El input de búsqueda no estuvo disponible. Recargando página...")
-                        await page.reload(wait_until="networkidle", timeout=40000)
+                        await page.reload(wait_until="domcontentloaded", timeout=30000)
                         await page.wait_for_timeout(3000)
                         continue
 
