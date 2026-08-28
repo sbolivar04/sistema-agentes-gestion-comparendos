@@ -8,11 +8,13 @@
 
 ## 📌 Descripción del Proyecto
 
-Sistema inteligente multiagente para la consulta, extracción y validación de comparendos de tránsito desde el portal oficial **SIMIT** asociados a flotas corporativas (por NIT o Placa). Integra:
-1. **Agente Extractor & Validador (Playwright)**: Navegación automatizada sobre SIMIT en tiempo real.
-2. **Motor de Reglas y Descuentos Legales**: Cálculo dinámico de vigencia de términos para descuentos del 50% y 25% (Ley 769/2002 y Ley 1843/2017) según calendario de días hábiles en Colombia.
+Sistema inteligente multiagente para la consulta, extracción, validación legal y análisis de comparendos de tránsito desde el portal oficial **SIMIT** asociados a flotas corporativas (por NIT o Placa).
+
+### 🤖 Arquitectura Multiagente:
+1. **Agente Extractor & Validador (Playwright)**: Navegación automatizada sobre SIMIT en tiempo real y ejecución programada en la nube con **GitHub Actions** y sincronización vía **Supabase `pg_cron`**.
+2. **Motor de Reglas y Descuentos Legales**: Cálculo dinámico de vigencia de términos para descuentos del 50% y 25% (Ley 769/2002 y Ley 1843/2017) según calendario de días hábiles y festivos en Colombia.
 3. **Repositorio Centralizado (Supabase Cloud)**: Persistencia en PostgreSQL bajo el esquema `comparendos_fscr`.
-4. **Agente Orquestador con IA (Gemini / Text-to-SQL)**: Agente de razonamiento en lenguaje natural para análisis de flota *(Fase 3)*.
+4. **Agente Orquestador Inteligente (Google Gemini + Text-to-SQL + Tools)**: Agente de razonamiento en lenguaje natural para análisis de flota, detección de riesgos de vencimiento, prescripción y consultas analíticas.
 5. **Plataforma Web y Dashboard KPI**: Visualización de métricas estratégicas y chat con el agente *(Fase 4)*.
 
 ---
@@ -28,14 +30,20 @@ Prototipo Sistema Agentes/
 │   ├── modelos.py                # Esquemas Pydantic de extracción
 │   ├── motor_descuentos.py       # Cálculo de vigencia de descuentos (50% y 25%)
 │   ├── festivos_colombia.py      # Calendario de festivos y días hábiles
+│   ├── extractor_lote.py         # Procesamiento masivo de toda la flota
 │   └── extractor_principal.py    # Lógica de ejecución del extractor
+│
+├── agente_orquestador/           # [Módulo Agente 2: IA & Text-to-SQL]
+│   ├── motor_gemini.py           # Cliente Gemini con Function Calling nativo
+│   ├── herramientas.py           # Herramientas especializadas (Tools)
+│   ├── prompts_sistema.py        # System instructions y marco legal Colombia
+│   ├── modelos.py                # Esquemas de mensajes y respuestas
+│   └── orquestador_principal.py  # CLI conversacional interactivo
 │
 ├── base_datos/                   # [Módulo Central: Base de Datos Supabase]
 │   ├── conexion.py               # Conexión resiliente a Supabase PostgreSQL
 │   ├── modelos.py                # Modelos ORM (comparendos, logs, preferencias)
 │   └── repositorio.py            # Guardado, upserts y resumen de flota
-│
-├── agente_orquestador/           # [Módulo Agente 2: IA & Text-to-SQL - Fase 3]
 │
 ├── plataforma_web/               # [Módulo Interfaz Web & Dashboard - Fase 4]
 │
@@ -46,24 +54,33 @@ Prototipo Sistema Agentes/
 ├── documentacion/                # [Documentos académicos de la tesis]
 │   └── PROPUESTA_TESIS.md        # Propuesta formal de grado
 │
-├── configuracion.py              # Parámetros y variables de entorno centrales
-├── .env                          # Credenciales privadas de Supabase
-├── .env.example                  # Plantilla de variables de entorno
-├── .gitignore                    # Reglas de exclusión para Git
-├── main_extractor.py             # Lanzador directo por consola
+├── .github/workflows/            # [Automatización CI/CD]
+│   └── extraccion_simit.yml      # Workflow de extracción en la nube
+│
+├── configuracion.py              # Parámetros y variables de entorno centrales (.env)
+├── main_extractor.py             # Lanzador directo del extractor
 ├── requirements.txt              # Dependencias de Python
 └── README.md                     # Documentación técnica
 ```
 
 ---
 
-## 🚀 Uso Rápido
+## 🚀 Modos de Uso
 
+### 1. Conversar con el Agente Orquestador Inteligente (IA):
 ```bash
-# Modo interactivo
-python main_extractor.py
+python agente_orquestador/orquestador_principal.py
+```
+*Ejemplos de preguntas en lenguaje natural:*
+- *"¿Cuál es el ahorro potencial que tenemos hoy si pagamos con descuento?"*
+- *"¿Qué multas tiene el vehículo de placa WNQ706 y cuándo vencen?"*
+- *"¿Cuáles son las 3 secretarías de tránsito donde más comparendos tenemos?"*
+- *"¿Hay algún comparendo con más de 3 años para solicitar prescripción legal?"*
 
-# O consulta directa
+### 2. Ejecutar Extractor SIMIT (Modo Consola / Interactivo):
+```bash
+python main_extractor.py
+# O consultas directas:
 python main_extractor.py 900123456
 python main_extractor.py PAI65E
 ```
