@@ -1,33 +1,8 @@
 import React, { useState } from 'react'
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  ArcElement,
-  Filler
-} from 'chart.js'
+import 'chart.js/auto'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
 import { BarChart3, PieChart, Calendar } from 'lucide-react'
 import { useTema } from '../contexto/ContextoTema'
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  ArcElement,
-  Filler
-)
 
 export function GraficasTemporales({ estadisticas = {} }) {
   const [vistaTemporal, setVistaTemporal] = useState('mes') // 'mes' | 'semana' | 'dia'
