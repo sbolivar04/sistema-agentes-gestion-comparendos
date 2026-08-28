@@ -20,8 +20,9 @@ logger = logging.getLogger("MotorGemini")
 
 class AgenteOrquestadorComparendos:
     """
-    Agente Orquestador Inteligente con Google Gemini (gemini-3.6-flash).
-    Gestiona Function Calling nativo, Text-to-SQL y razonamiento legal/financiero sobre la flota.
+    Agente Orquestador Inteligente con Google Gemini.
+    Gestiona Function Calling nativo, Text-to-SQL y razonamiento legal/financiero sobre la flota
+    operando estrictamente con temperatura 0.0 para evitar alucinaciones.
     """
 
     def __init__(self, modelo: str = "gemini-3.6-flash"):
@@ -39,25 +40,25 @@ class AgenteOrquestadorComparendos:
         self._iniciar_chat()
 
     def _iniciar_chat(self):
-        """Inicializa la sesión de chat conversacional con Function Calling activo."""
+        """Inicializa la sesión de chat conversacional con Function Calling activo y temperatura 0.0."""
         config_gen = types.GenerateContentConfig(
             system_instruction=INSTRUCCIONES_SISTEMA_ORQUESTADOR,
             tools=self.herramientas,
-            temperature=0.2
+            temperature=0.0  # Temperatura 0.0 para máxima precisión y cero invención
         )
         self.chat = self.client.chats.create(
             model=self.modelo,
             config=config_gen
         )
-        logger.info(f"Sesión del Agente Orquestador inicializada con modelo: {self.modelo}")
+        logger.info(f"Sesión del Agente Orquestador inicializada con modelo: {self.modelo} (Temperatura: 0.0)")
 
     def procesar_mensaje(self, mensaje_usuario: str) -> EsquemaRespuestaAgente:
         """
         Envía el mensaje del usuario al modelo Gemini, ejecuta las herramientas requeridas y retorna la respuesta.
-        Incluye reintento automático si se alcanza el límite por minuto de la API.
+        Incluye reintento automático con backoff exponencial ante límites de tasa (429) o sobrecarga temporal del servidor (503).
         """
         import time
-        max_reintentos = 3
+        max_reintentos = 4
         
         for intento in range(1, max_reintentos + 1):
             try:
@@ -72,9 +73,11 @@ class AgenteOrquestadorComparendos:
                 )
             except Exception as e:
                 error_str = str(e)
-                if ("429" in error_str or "RESOURCE_EXHAUSTED" in error_str) and intento < max_reintentos:
-                    tiempo_espera = 10 * intento
-                    logger.warning(f"Límite de tasa temporal alcanzado. Reintentando en {tiempo_espera}s... (Intento {intento}/{max_reintentos})")
+                es_reintentable = any(cod in error_str for cod in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"])
+                
+                if es_reintentable and intento < max_reintentos:
+                    tiempo_espera = 4 * (2 ** (intento - 1))  # 4s, 8s, 16s...
+                    logger.warning(f"Servicio de IA ocupado ({error_str[:60]}...). Reintentando en {tiempo_espera}s (Intento {intento}/{max_reintentos})...")
                     time.sleep(tiempo_espera)
                     continue
                 
