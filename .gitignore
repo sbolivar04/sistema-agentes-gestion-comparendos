@@ -44,3 +44,7 @@ playwright/.cache/
 *.swp
 *.swo
 .DS_Store
+
+# Node / Frontend
+node_modules/
+plataforma_web/cliente/node_modules/

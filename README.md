@@ -67,17 +67,26 @@ Prototipo Sistema Agentes/
 
 ## 🚀 Modos de Uso
 
-### 1. Conversar con el Agente Orquestador Inteligente (IA):
+### 1. Plataforma Web Corporativa & Dashboard Interactivo (React + FastAPI):
+```bash
+python main_web.py
+```
+- **URL de la Aplicación:** [http://127.0.0.1:8000](http://127.0.0.1:8000)
+- **Documentación Swagger API:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **Funcionalidades:**
+  * Login corporativo con logo de **FSCR Ingeniería S.A.S.** y Supabase Auth.
+  * Selector de tema: **Blanco (Predeterminado)** y **Modo Oscuro**.
+  * Semáforo de alertas de vencimiento de descuentos (8 a 5 días amarillo, $\le 4$ días rojo).
+  * Gráficas interactivas por mes, día y distribución por secretaría.
+  * Tabla con paginación configurable (5 por defecto, 10, 20, 50 y personalizado), búsqueda en vivo y filtros.
+  * Asistente conversacional de IA integrado en panel flotante.
+
+### 2. Conversar con el Agente Orquestador por Consola (CLI):
 ```bash
 python agente_orquestador/orquestador_principal.py
 ```
-*Ejemplos de preguntas en lenguaje natural:*
-- *"¿Cuál es el ahorro potencial que tenemos hoy si pagamos con descuento?"*
-- *"¿Qué multas tiene el vehículo de placa WNQ706 y cuándo vencen?"*
-- *"¿Cuáles son las 3 secretarías de tránsito donde más comparendos tenemos?"*
-- *"¿Hay algún comparendo con más de 3 años para solicitar prescripción legal?"*
 
-### 2. Ejecutar Extractor SIMIT (Modo Consola / Interactivo):
+### 3. Ejecutar Extractor SIMIT (Modo Consola / Interactivo):
 ```bash
 python main_extractor.py
 # O consultas directas:

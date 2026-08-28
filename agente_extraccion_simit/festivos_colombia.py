@@ -28,3 +28,24 @@ def sumar_dias_habiles(fecha_inicio: date, numero_dias: int) -> date:
             dias_sumados += 1
 
     return fecha_actual
+
+def contar_dias_habiles(fecha_inicio: date, fecha_fin: date) -> int:
+    """
+    Cuenta la cantidad de días hábiles entre fecha_inicio y fecha_fin (ambas inclusive o hasta fecha_fin).
+    Excluye sábados, domingos y festivos oficiales en Colombia.
+    """
+    if fecha_inicio > fecha_fin:
+        return 0
+
+    anios = list(range(fecha_inicio.year, fecha_fin.year + 1))
+    festivos = obtener_festivos_colombia(anios)
+
+    dias_habiles = 0
+    fecha_cursor = fecha_inicio + timedelta(days=1)
+
+    while fecha_cursor <= fecha_fin:
+        if fecha_cursor.weekday() < 5 and fecha_cursor not in festivos:
+            dias_habiles += 1
+        fecha_cursor += timedelta(days=1)
+
+    return dias_habiles
