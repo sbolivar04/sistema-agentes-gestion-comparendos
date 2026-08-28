@@ -25,7 +25,7 @@ class AgenteOrquestadorComparendos:
     operando estrictamente con temperatura 0.0 para evitar alucinaciones.
     """
 
-    def __init__(self, modelo: str = "gemini-3.6-flash"):
+    def __init__(self, modelo: str = "gemini-3.5-flash-lite"):
         self.modelo = modelo
         self.client = genai.Client(api_key=configuracion.GEMINI_API_KEY)
         self.herramientas = [
