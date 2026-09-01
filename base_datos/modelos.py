@@ -50,9 +50,9 @@ class ComparendoORM(Base):
     fecha_descarga_simit: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     
     # Auditoría
-    fecha_creacion_registro: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
+    fecha_creacion_registro: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     fecha_ultima_actualizacion: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, onupdate=datetime.now, nullable=False
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
 class LogExtraccionORM(Base):
@@ -61,7 +61,7 @@ class LogExtraccionORM(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     criterio_busqueda: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     tipo_consulta: Mapped[str] = mapped_column(String(20), nullable=False)
-    fecha_ejecucion: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
+    fecha_ejecucion: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     registros_encontrados: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     registros_nuevos: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     registros_actualizados: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -74,4 +74,4 @@ class PreferenciaConsultaORM(Base):
 
     criterio_busqueda: Mapped[str] = mapped_column(String(50), primary_key=True)
     tipo_documento: Mapped[str] = mapped_column(String(50), nullable=False)
-    fecha_registro: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
+    fecha_registro: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

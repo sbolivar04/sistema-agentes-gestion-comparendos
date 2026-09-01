@@ -53,5 +53,10 @@ export const apiBackend = {
       body: JSON.stringify({ criterio, tipo_consulta })
     })
     return await res.json()
+  },
+
+  async obtenerEstadoExtraccion() {
+    const res = await fetch(`${API_BASE}/extraccion/estado`)
+    return await res.json()
   }
 }

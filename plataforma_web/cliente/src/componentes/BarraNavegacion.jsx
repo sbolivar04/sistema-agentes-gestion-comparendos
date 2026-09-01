@@ -2,48 +2,44 @@ import React, { useState } from 'react'
 import { useTema } from '../contexto/ContextoTema'
 import { useAutenticacion } from '../contexto/ContextoAutenticacion'
 import { 
-  Sun, Moon, Bell, LogOut, RefreshCw, User, CheckCircle2, 
-  AlertTriangle, Clock, ShieldAlert, Sparkles 
+  Sun, Moon, Bell, Power, RefreshCw, ChevronDown, Clock
 } from 'lucide-react'
 
-export function BarraNavegacion({ alertas = {}, alSincronizar, cargandoSincronizacion, alAbrirChat }) {
+export function BarraNavegacion({ alertas = {}, ultimaSincronizacion, alSincronizar, cargandoSincronizacion, alAbrirChat }) {
   const { alternarTema, esOscuro } = useTema()
   const { usuario, cerrarSesion } = useAutenticacion()
   const [mostrarNotificaciones, setMostrarNotificaciones] = useState(false)
+  const [menuPerfilAbierto, setMenuPerfilAbierto] = useState(false)
+  const [mostrarModalLogout, setMostrarModalLogout] = useState(false)
 
   const totalAlertas = (alertas.total_rojas || 0) + (alertas.total_amarillas || 0) + (alertas.total_nuevos_recientes || 0)
 
   return (
     <header className="barra-navegacion">
-      <div className="logo-contenedor">
-        <img src="/logo-fscr.png" alt="FSCR Ingeniería Logo" className="logo-img" />
-        <div className="logo-texto">
-          <h1>FSCR Ingeniería S.A.S.</h1>
-          <p>Gestión Inteligente de Comparendos SIMIT</p>
-        </div>
+      {/* Información Institucional FSCR en barra superior */}
+      <div className="barra-marca-contenedor">
+        <h1 className="barra-marca-titulo">FSCR Ingeniería S.A.S.</h1>
+        <span className="barra-subtitulo-gestion">GESTIÓN INTELIGENTE DE COMPARENDOS SIMIT</span>
       </div>
 
       <div className="nav-acciones">
-        {/* Botón Abrir Asistente IA */}
-        <button 
-          className="boton-primario" 
-          style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }}
-          onClick={alAbrirChat}
-          title="Consultar al Agente Inteligente"
-        >
-          <Sparkles size={16} />
-          <span>Asistente IA</span>
-        </button>
+        {/* Fecha y Hora de Última Sincronización SIMIT Real (Horario Colombia UTC-5) */}
+        <div className="badge-sincronizacion-top" title="Estado de sincronización con la plataforma SIMIT (Horario Colombia)">
+          <Clock size={13} className={`icono-sincro-reloj ${cargandoSincronizacion ? 'spin-animation' : ''}`} />
+          <span>
+            {cargandoSincronizacion ? 'Sincronizando...' : `Sincronizado: ${ultimaSincronizacion || 'Actualizando...'}`}
+          </span>
+        </div>
 
         {/* Botón Sincronizar SIMIT */}
         <button 
           className="boton-secundario" 
-          style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }}
+          style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem' }}
           onClick={alSincronizar}
           disabled={cargandoSincronizacion}
           title="Sincronizar SIMIT en vivo"
         >
-          <RefreshCw size={15} className={cargandoSincronizacion ? 'spin-animation' : ''} />
+          <RefreshCw size={14} className={cargandoSincronizacion ? 'spin-animation' : ''} />
           <span>{cargandoSincronizacion ? 'Sincronizando...' : 'Actualizar SIMIT'}</span>
         </button>
 
@@ -54,7 +50,7 @@ export function BarraNavegacion({ alertas = {}, alSincronizar, cargandoSincroniz
             onClick={() => setMostrarNotificaciones(!mostrarNotificaciones)}
             title="Centro de Alertas de Vencimiento"
           >
-            <Bell size={18} />
+            <Bell size={17} />
             {totalAlertas > 0 && (
               <span className="badge-notificacion">{totalAlertas}</span>
             )}
@@ -62,20 +58,7 @@ export function BarraNavegacion({ alertas = {}, alSincronizar, cargandoSincroniz
 
           {/* Menú Desplegable de Notificaciones */}
           {mostrarNotificaciones && (
-            <div style={{
-              position: 'absolute',
-              top: '50px',
-              right: 0,
-              width: '360px',
-              background: 'var(--fondo-tarjeta)',
-              border: '1px solid var(--borde-tarjeta)',
-              borderRadius: 'var(--radio-lg)',
-              boxShadow: 'var(--sombra-lg)',
-              padding: '1rem',
-              zIndex: 100,
-              maxHeight: '420px',
-              overflowY: 'auto'
-            }}>
+            <div className="menu-desplegable-notificaciones">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid var(--borde-tarjeta)', paddingBottom: '0.5rem' }}>
                 <h4 style={{ fontSize: '0.9rem', fontWeight: 700 }}>Alertas de Flota</h4>
                 <span style={{ fontSize: '0.75rem', color: 'var(--texto-secundario)' }}>{totalAlertas} pendientes</span>
@@ -107,27 +90,6 @@ export function BarraNavegacion({ alertas = {}, alSincronizar, cargandoSincroniz
                       </p>
                     </div>
                   ))}
-
-                  {alertas.comparendos_nuevos?.slice(0, 3).map((nuevo) => (
-                    <div 
-                      key={`nuevo-${nuevo.id}`}
-                      style={{
-                        padding: '0.65rem',
-                        borderRadius: 'var(--radio-md)',
-                        background: 'var(--fondo-elevado)',
-                        border: '1px solid var(--borde-tarjeta)',
-                        fontSize: '0.78rem'
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
-                        <span>Nuevo Comparendo: {nuevo.placa}</span>
-                        <span style={{ color: 'var(--color-primario)' }}>${nuevo.valor_total.toLocaleString('es-CO')}</span>
-                      </div>
-                      <p style={{ color: 'var(--texto-secundario)', marginTop: '0.2rem' }}>
-                        {nuevo.secretaria} • {nuevo.codigo_infraccion}
-                      </p>
-                    </div>
-                  ))}
                 </div>
               )}
             </div>
@@ -140,28 +102,111 @@ export function BarraNavegacion({ alertas = {}, alSincronizar, cargandoSincroniz
           onClick={alternarTema}
           title={esOscuro ? 'Cambiar a Modo Blanco' : 'Cambiar a Modo Oscuro'}
         >
-          {esOscuro ? <Sun size={18} /> : <Moon size={18} />}
+          {esOscuro ? <Sun size={17} /> : <Moon size={17} />}
         </button>
 
-        {/* Perfil y Salir */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderLeft: '1px solid var(--borde-tarjeta)', paddingLeft: '0.75rem' }}>
-          <div style={{ textAlign: 'right' }}>
-            <p style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--texto-principal)' }}>
-              {usuario?.nombre || 'Usuario Flota'}
-            </p>
-            <p style={{ fontSize: '0.7rem', color: 'var(--texto-atenuado)' }}>
-              {usuario?.rol || 'FSCR'}
-            </p>
-          </div>
-          <button 
-            className="boton-icono" 
-            onClick={cerrarSesion}
-            title="Cerrar Sesión"
+        {/* =========================================================================
+            PERFIL CORPORATIVO CON MENÚ DESPLEGABLE (DROPDOWN)
+           ========================================================================= */}
+        <div style={{ position: 'relative' }}>
+          <div 
+            className="perfil-usuario-capsula"
+            onClick={() => setMenuPerfilAbierto(!menuPerfilAbierto)}
+            title="Opciones de usuario"
           >
-            <LogOut size={16} color="var(--color-peligro-rojo)" />
-          </button>
+            <div className="avatar-usuario-contenedor">
+              <div className="avatar-usuario-circulo">
+                {usuario?.nombre ? usuario.nombre.substring(0, 2).toUpperCase() : 'OP'}
+              </div>
+              <span className="avatar-punto-activo" title="Sesión activa"></span>
+            </div>
+
+            <div className="info-usuario-texto">
+              <span className="nombre-usuario-texto">
+                {usuario?.nombre ? (usuario.nombre.charAt(0).toUpperCase() + usuario.nombre.slice(1)) : 'Operaciones'}
+              </span>
+              <span className="rol-usuario-badge">
+                {usuario?.rol || 'Gerencia de Operaciones'}
+              </span>
+            </div>
+
+            <ChevronDown 
+              size={15} 
+              className="chevron-perfil" 
+              style={{ transform: menuPerfilAbierto ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease' }} 
+            />
+          </div>
+
+          {/* Menú flotante del Dropdown */}
+          {menuPerfilAbierto && (
+            <div className="menu-desplegable-perfil">
+              <div className="menu-perfil-cabecera">
+                <strong>{usuario?.nombre || 'Operaciones FSCR'}</strong>
+                <span>{usuario?.email || 'operaciones@fscr.com.co'}</span>
+              </div>
+              <div className="separador-menu"></div>
+              <button 
+                className="menu-item-accion salir" 
+                onClick={() => {
+                  setMenuPerfilAbierto(false)
+                  setMostrarModalLogout(true)
+                }}
+              >
+                <Power size={15} />
+                <span>Cerrar sesión</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* =========================================================================
+          MODAL DE CONFIRMACIÓN (FORMATO VERTICAL CON MARCO AZUL Y PADDINGS COMPACTOS)
+         ========================================================================= */}
+      {mostrarModalLogout && (
+        <div className="modal-fondo" onClick={() => setMostrarModalLogout(false)}>
+          <div 
+            className="modal-caja-logout" 
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Logo Oficial de FSCR en Tarjeta Blanca con Borde Azul */}
+            <div className="modal-logout-logo-contenedor">
+              <div className="modal-logout-logo-caja-blanca">
+                <img 
+                  src="/logo-fscr.png" 
+                  alt="FSCR Ingeniería S.A.S." 
+                  className="modal-logout-logo" 
+                />
+              </div>
+            </div>
+
+            <div className="modal-logout-cuerpo">
+              <h2 className="modal-logout-titulo">¿Cerrar sesión de FSCR?</h2>
+
+              <p className="modal-logout-mensaje">
+                Estás a punto de salir de la plataforma de control de comparendos. Para ingresar nuevamente tendrás que autenticarte.
+              </p>
+            </div>
+
+            {/* Los 2 botones en UNA SOLA LÍNEA */}
+            <div className="modal-logout-acciones">
+              <button 
+                className="boton-secundario"
+                onClick={() => setMostrarModalLogout(false)}
+              >
+                Cancelar
+              </button>
+              <button 
+                className="boton-peligro-confirmar"
+                onClick={cerrarSesion}
+              >
+                <Power size={15} />
+                <span>Confirmar y Salir</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   )
 }

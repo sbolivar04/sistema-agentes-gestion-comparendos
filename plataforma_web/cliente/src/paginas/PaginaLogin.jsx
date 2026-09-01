@@ -43,14 +43,18 @@ export function PaginaLogin() {
 
       <div className="login-tarjeta">
         <div className="login-logo-contenedor">
-          <img src="/logo-fscr.png" alt="FSCR Ingeniería S.A.S." className="login-logo" />
+          <img 
+            src="/logo-fscr.png" 
+            alt="FSCR Ingeniería S.A.S." 
+            className="login-logo" 
+          />
         </div>
         
-        <h2 style={{ fontFamily: 'var(--fuente-titulos)', fontSize: '1.3rem', fontWeight: '700', color: 'var(--texto-principal)', marginTop: '0.1rem' }}>
-          Gestión de Comparendos
+        <h2 style={{ fontFamily: 'var(--fuente-titulos)', fontSize: '1.25rem', fontWeight: '700', color: 'var(--texto-principal)', marginTop: '0.1rem' }}>
+          Centro de Control Inteligente SIMIT
         </h2>
         <p style={{ color: 'var(--texto-secundario)', fontSize: '0.8rem', marginTop: '0.15rem', marginBottom: '0.65rem' }}>
-          Gestión preventiva y seguimiento legal de flota (SIMIT)
+          Gestión preventiva y seguimiento legal de flota
         </p>
 
         {error && (

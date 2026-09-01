@@ -16,6 +16,7 @@ export function PaginaDashboard() {
   const [sincronizando, setSincronizando] = useState(false)
   const [mensajeSync, setMensajeSync] = useState('')
   const [chatAbierto, setChatAbierto] = useState(false)
+  const [versionTabla, setVersionTabla] = useState(0)
 
   const cargarDatosDashboard = async () => {
     try {
@@ -37,22 +38,76 @@ export function PaginaDashboard() {
 
   useEffect(() => {
     cargarDatosDashboard()
+
+    // Polling en tiempo real cada 30 segundos
+    const intervalo = setInterval(() => {
+      cargarDatosDashboard()
+    }, 30000)
+
+    // Recargar inmediatamente al volver a la pestaña
+    const alCambiarVisibilidad = () => {
+      if (document.visibilityState === 'visible') {
+        cargarDatosDashboard()
+      }
+    }
+    document.addEventListener('visibilitychange', alCambiarVisibilidad)
+
+    return () => {
+      clearInterval(intervalo)
+      document.removeEventListener('visibilitychange', alCambiarVisibilidad)
+    }
   }, [])
 
   const sincronizarSimit = async () => {
     setSincronizando(true)
-    setMensajeSync('Iniciando extracción en vivo desde SIMIT...')
+    setMensajeSync('El agente está iniciando la consulta de comparendos en el SIMIT...')
     try {
       const res = await apiBackend.lanzarExtraccion()
-      if (res.exitoso) {
-        setMensajeSync('¡Extracción completada con éxito!')
-        await cargarDatosDashboard()
-      } else {
-        setMensajeSync(res.mensaje || 'Error durante la extracción.')
+      if (!res.exitoso) {
+        setMensajeSync(res.mensaje || 'No fue posible iniciar la consulta en este momento.')
+        setSincronizando(false)
+        setTimeout(() => setMensajeSync(''), 5000)
+        return
       }
+
+      setMensajeSync('El agente está verificando el estado de la flota en el SIMIT en vivo...')
+
+      // Esperar 4 segundos antes de iniciar el monitoreo para que comience la consulta
+      await new Promise(resolve => setTimeout(resolve, 4000))
+
+      const tiempoInicio = Date.now()
+      const intervaloEstado = setInterval(async () => {
+        try {
+          // Timeout de seguridad a los 3.5 minutos
+          if (Date.now() - tiempoInicio > 210000) {
+            clearInterval(intervaloEstado)
+            setSincronizando(false)
+            setMensajeSync('La consulta está tomando un poco más de tiempo de lo habitual. En breve verás los datos actualizados.')
+            setTimeout(() => setMensajeSync(''), 6000)
+            return
+          }
+
+          const estado = await apiBackend.obtenerEstadoExtraccion()
+          if (estado && !estado.en_progreso) {
+            clearInterval(intervaloEstado)
+            setSincronizando(false)
+            if (estado.conclusion === 'success') {
+              setMensajeSync('¡Sincronización completada! Los comparendos de la flota se han actualizado correctamente.')
+              await cargarDatosDashboard()
+              setVersionTabla(v => v + 1)
+            } else {
+              setMensajeSync('La consulta ha finalizado. Los datos disponibles ya están actualizados.')
+              await cargarDatosDashboard()
+            }
+            setTimeout(() => setMensajeSync(''), 6000)
+          }
+        } catch (err) {
+          console.error('Error al monitorear el estado del agente:', err)
+        }
+      }, 4000)
+
     } catch (e) {
-      setMensajeSync('Error de comunicación con el servidor.')
-    } finally {
+      setMensajeSync('No fue posible comunicarse con el servicio en este momento. Inténtalo de nuevo.')
       setSincronizando(false)
       setTimeout(() => setMensajeSync(''), 5000)
     }
@@ -62,6 +117,7 @@ export function PaginaDashboard() {
     <div className="app-contenedor">
       <BarraNavegacion 
         alertas={alertas}
+        ultimaSincronizacion={metricas.ultima_sincronizacion}
         alSincronizar={sincronizarSimit}
         cargandoSincronizacion={sincronizando}
         alAbrirChat={() => setChatAbierto(true)}
@@ -107,7 +163,7 @@ export function PaginaDashboard() {
         )}
 
         {/* 1. Tarjetas KPI */}
-        <TarjetasKPI metricas={metricas} />
+        <TarjetasKPI metricas={metricas} alertas={alertas} />
 
         {/* 2. Panel de Alertas Inteligentes (Semáforo de Descuentos) */}
         <PanelAlertas alertas={alertas} />
@@ -116,7 +172,7 @@ export function PaginaDashboard() {
         <GraficasTemporales estadisticas={estadisticas} />
 
         {/* 4. Tabla de Comparendos con Paginación Configurable */}
-        <TablaComparendos />
+        <TablaComparendos key={versionTabla} />
       </main>
 
       {/* Botón Flotante para Asistente IA */}

@@ -12,10 +12,11 @@ from plataforma_web.rutas_api.comparendos import enrutador_comparendos
 from plataforma_web.rutas_api.chat import enrutador_chat
 from plataforma_web.rutas_api.extraccion import enrutador_extraccion
 
+# Version 1.0.1 - Sincronizacion en tiempo real activa
 app = FastAPI(
     title="Sistema de Gestión y Seguimiento de Comparendos SIMIT - FSCR Ingeniería",
     description="Plataforma de Inteligencia Artificial y Dashboard para Flotas Corporativas",
-    version="1.0.0"
+    version="1.0.1"
 )
 
 # Configurar CORS

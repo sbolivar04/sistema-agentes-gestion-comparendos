@@ -159,50 +159,52 @@ class ClienteNavegadorSimit:
                         await page.press(input_selector, "Enter")
                         logger.info(f"[Intento {intento}] Consulta enviada mediante tecla Enter.")
 
-                    # INICIO DEL CRONÓMETRO DE 15 SEGUNDOS DESPUÉS DE DAR CLIC EN BUSCAR
-                    logger.info(f"[Intento {intento}] Consulta enviada. Esperando hasta 15 segundos a que SIMIT renderice la respuesta...")
+                    # INICIO DEL CRONÓMETRO DE ESPERA TRAS DAR CLIC EN BUSCAR
+                    logger.info(f"[Intento {intento}] Consulta enviada. Esperando a que SIMIT renderice la respuesta...")
                     
                     render_ok = False
                     es_vacio = False
-                    for seg in range(1, 16): # 15 segundos estrictos post-clic
+                    for seg in range(1, 26): # hasta 25 segundos post-clic
                         await page.wait_for_timeout(1000)
                         
                         # ¿Apareció el modal de múltiples resultados (Nit/Cédula)?
-                        modals = await page.query_selector_all(".modal-content, .modal-dialog, dialog")
+                        modals = await page.query_selector_all(".modal-content, .modal-dialog, dialog, #modalMultiplesPersonas")
                         modal_detectado = False
                         for m in modals:
                             if await m.is_visible():
                                 texto_modal = await m.inner_text()
-                                if "varios resultados" in texto_modal or "Selecciona el que desees" in texto_modal:
+                                if "varios resultados" in texto_modal or "Selecciona el que desees" in texto_modal or "documento" in texto_modal.lower():
                                     logger.info("SIMIT solicita aclarar el tipo de documento (Múltiples resultados).")
                                     await self._handle_disambiguation_modal(page, criterio_clean, m)
+                                    api_consulta_json = None # Resetear payload interceptado para esperar la nueva respuesta
                                     modal_detectado = True
+                                    await page.wait_for_timeout(2000)
                                     break
                                     
                         if modal_detectado:
                             continue
 
                         # ¿Aparecieron filas de comparendos en la tabla?
-                        rows_found = await page.query_selector_all("mat-table mat-row, table tbody tr, tr.mat-row")
+                        rows_found = await page.query_selector_all("mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row")
                         if len(rows_found) > 0:
                             render_ok = True
                             busqueda_exitosa = True
-                            logger.info(f"[Intento {intento}] ¡Tabla de comparendos renderizada a los {seg} segundos!")
+                            logger.info(f"[Intento {intento}] ¡Tabla de comparendos renderizada a los {seg} segundos ({len(rows_found)} filas encontradas)!")
                             break
 
                         # ¿SIMIT desplegó un mensaje oficial dentro del contenedor de resultados?
-                        result_container = await page.query_selector("app-comparendos, #mainView, .main-layout-content, .alert, .estado-cuenta")
+                        result_container = await page.query_selector("app-comparendos, #mainView, .main-layout-content, .alert, .estado-cuenta, .empty-state")
                         if result_container:
                             res_text = (await result_container.inner_text()).lower()
-                            if any(msg in res_text for msg in ["no tiene comparendos", "no tienes comparendos", "sin comparendos", "no se encontraron", "no registra comparendos"]):
+                            if any(msg in res_text for msg in ["no tiene comparendos", "no tienes comparendos", "sin comparendos", "no se encontraron comparendos", "no registra comparendos"]):
                                 render_ok = True
                                 busqueda_exitosa = True
                                 es_vacio = True
                                 logger.info(f"[Intento {intento}] SIMIT confirma oficialmente por texto a los {seg}s: No existen comparendos registrados para {criterio_clean}.")
                                 break
                                 
-                        # OPCIÓN 1: ¿La API interna de SIMIT ya respondió que está vacío?
-                        if api_consulta_json is not None:
+                        # Verificación con API interna solo tras al menos 6 segundos de espera
+                        if seg >= 6 and api_consulta_json is not None:
                             multas = api_consulta_json.get("multas", [])
                             comps = api_consulta_json.get("comparendos", [])
                             resols = api_consulta_json.get("resoluciones", [])
@@ -216,9 +218,12 @@ class ClienteNavegadorSimit:
                     if render_ok:
                         break
                     else:
-                        logger.warning(f"[Intento {intento}] Transcurrieron 15 segundos sin que SIMIT terminara de cargar la respuesta. Refrescando página y reintentando...")
-                        await page.reload(wait_until="networkidle", timeout=40000)
-                        await page.wait_for_timeout(3000)
+                        logger.warning(f"[Intento {intento}] Tiempo de espera agotado sin respuesta clara de SIMIT. Recargando página y reintentando...")
+                        try:
+                            await page.goto(self.simit_url, wait_until="domcontentloaded", timeout=25000)
+                            await page.wait_for_timeout(3000)
+                        except Exception as err_reload:
+                            logger.warning(f"[Intento {intento}] Error al recargar página de SIMIT: {err_reload}")
 
                 if not busqueda_exitosa:
                     error_msg = f"SIMIT no respondió correctamente tras {max_intentos} intentos. Posible caída del portal oficial."
@@ -489,90 +494,71 @@ class ClienteNavegadorSimit:
 
     async def _handle_disambiguation_modal(self, page, criterio: str, modal=None):
         """Maneja el modal de SIMIT cuando encuentra múltiples documentos (ej. NIT y Cédula) para el mismo número."""
-        if not modal:
-            modal = await page.query_selector(".modal-content:has(#modalMultiplesPersonas)")
+        try:
             if not modal:
-                modal = page
-            
-        radios = await modal.query_selector_all("input[type='radio']")
-        opciones = []
-        for r in radios:
-            # Obtener el texto asociado al radio button
-            label_text = await r.evaluate("(el) => el.parentElement.innerText || el.nextElementSibling.innerText || ''")
-            opciones.append((r, label_text.strip()))
-            
-        if not opciones:
-            logger.warning("Modal detectado pero no se hallaron opciones (radio buttons).")
-            return
-            
-        from base_datos.conexion import get_db_session
-        from base_datos.repositorio import DatabaseRepository
-        
-        opcion_elegida = None
-        
-        with get_db_session() as session:
-            repo = DatabaseRepository(session)
-            pref = repo.get_preferencia_documento(criterio)
-            
-            if pref:
-                for r, label in opciones:
-                    if pref.lower() in label.lower():
-                        opcion_elegida = r
-                        logger.info(f"Usando preferencia guardada '{pref}' para el documento {criterio}.")
-                        break
-                        
-            if not opcion_elegida:
-                print("\n" + "="*80)
-                print(f" [SIMIT] REQUIERE ATENCIÓN MANUAL: MÚLTIPLES RESULTADOS PARA '{criterio}'")
-                print(" SIMIT encontró varias entidades asociadas a este número. Seleccione la correcta:")
-                for i, (r, label) in enumerate(opciones, 1):
-                    # Limpiar saltos de línea para mostrar bonito
-                    clean_label = label.replace('\n', ' - ')
-                    print(f"   {i}. {clean_label}")
-                print("="*80)
+                modal = await page.query_selector(".modal-content:has(#modalMultiplesPersonas)")
+                if not modal:
+                    modal = page
                 
-                seleccion = None
-                while not seleccion:
-                    resp = await asyncio.to_thread(input, "\n>>> Ingrese el número de la opción correcta (ej. 1 o 2): ")
-                    try:
-                        idx = int(resp.strip()) - 1
-                        if 0 <= idx < len(opciones):
-                            seleccion = opciones[idx]
-                        else:
-                            print(" Opción inválida. Intente de nuevo.")
-                    except:
-                        print(" Por favor ingrese un número válido.")
-                        
-                opcion_elegida, label_elegido = seleccion
+            radios = await modal.query_selector_all("input[type='radio']")
+            opciones = []
+            for r in radios:
+                label_text = await r.evaluate("(el) => el.parentElement.innerText || el.nextElementSibling.innerText || ''")
+                opciones.append((r, label_text.strip()))
                 
-                tipo_a_guardar = "Desconocida"
-                if "Nit" in label_elegido or "NIT" in label_elegido:
-                    tipo_a_guardar = "Nit"
-                elif "Cédula" in label_elegido or "Cedula" in label_elegido:
-                    tipo_a_guardar = "Cédula"
+            if not opciones:
+                logger.warning("Modal detectado pero no se hallaron opciones (radio buttons).")
+                return
+                
+            from base_datos.conexion import obtener_sesion_bd
+            from base_datos.repositorio import RepositorioBaseDatos
+            
+            opcion_elegida = None
+            
+            with obtener_sesion_bd() as session:
+                repo = RepositorioBaseDatos(session)
+                pref = repo.obtener_preferencia_documento(criterio)
+                
+                if pref:
+                    for r, label in opciones:
+                        if pref.lower() in label.lower():
+                            opcion_elegida = r
+                            logger.info(f"Usando preferencia guardada '{pref}' para el documento {criterio}.")
+                            break
+                            
+                if not opcion_elegida:
+                    # En modo no interactivo / headless / flota corporativa: seleccionar automáticamente la opción de NIT
+                    for r, label in opciones:
+                        if "nit" in label.lower():
+                            opcion_elegida = r
+                            logger.info(f"Seleccionando automáticamente opción '{label}' (NIT) para {criterio}.")
+                            repo.guardar_preferencia_documento(criterio, "Nit")
+                            break
+                            
+                    # Fallback si ninguna contiene explícitamente la palabra 'nit'
+                    if not opcion_elegida and len(opciones) > 0:
+                        opcion_elegida, label_elegido = opciones[0]
+                        logger.info(f"Seleccionando por defecto primera opción '{label_elegido}' para {criterio}.")
+                        repo.guardar_preferencia_documento(criterio, "Nit")
                     
-                repo.save_preferencia_documento(criterio, tipo_a_guardar)
-                logger.info(f"Se guardó la preferencia '{tipo_a_guardar}' en la BD para futuras consultas.")
+            if opcion_elegida:
+                # Seleccionar la opción elegida
+                await opcion_elegida.evaluate("(el) => el.click()")
+                await page.wait_for_timeout(600)
                 
-        # Seleccionar la opción elegida (usamos evaluate para mayor confiabilidad en custom-radios)
-        await opcion_elegida.evaluate("(el) => el.click()")
-        await page.wait_for_timeout(500)
-        
-        # Hacer clic en Continuar
-        btn_continuar = await modal.query_selector("button:has-text('Continuar')")
-        if not btn_continuar:
-            # fallback
-            btn_continuar = await modal.query_selector(".btn-primary")
-            
-        if btn_continuar:
-            await btn_continuar.evaluate("(el) => el.click()")
-            logger.info("Se hizo clic en el botón Continuar del modal.")
-        else:
-            await page.keyboard.press("Enter")
-            logger.info("No se encontró el botón Continuar, se presionó Enter.")
-            
-        logger.info("Opción de documento confirmada. Esperando carga de resultados...")
-        await page.wait_for_timeout(2000)
+                # Hacer clic en Continuar
+                btn_continuar = await modal.query_selector("button:has-text('Continuar'), .btn-primary, button.btn-continuar")
+                if btn_continuar:
+                    await btn_continuar.evaluate("(el) => el.click()")
+                    logger.info("Se hizo clic en el botón Continuar del modal de desambiguación.")
+                else:
+                    await page.keyboard.press("Enter")
+                    logger.info("No se encontró el botón Continuar, se presionó Enter.")
+                    
+                logger.info("Opción de documento confirmada. Esperando carga de resultados...")
+                await page.wait_for_timeout(2500)
+        except Exception as e:
+            logger.warning(f"Error al manejar modal de desambiguación: {e}")
 
 
 # Alias de compatibilidad

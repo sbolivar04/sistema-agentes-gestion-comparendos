@@ -3,13 +3,13 @@ import { Search, Filter, ChevronLeft, ChevronRight, Eye, SlidersHorizontal } fro
 import { apiBackend } from '../servicios/apiBackend'
 import { ModalDetalleComparendo } from './ModalDetalleComparendo'
 
-export function TablaComparendos() {
+export function TablaComparendos({ busquedaExterna = '', alLimpiarBusquedaExterna }) {
   const [comparendos, setComparendos] = useState([])
   const [totalRegistros, setTotalRegistros] = useState(0)
   const [totalPaginas, setTotalPaginas] = useState(1)
   const [paginaActual, setPaginaActual] = useState(1)
   
-  // Paginación por defecto en 5 como lo solicitó el usuario
+  // Paginación por defecto en 5
   const [limitePorPagina, setLimitePorPagina] = useState(5)
   const [limitePersonalizado, setLimitePersonalizado] = useState('')
   const [mostrarInputPersonalizado, setMostrarInputPersonalizado] = useState(false)
@@ -19,6 +19,38 @@ export function TablaComparendos() {
   const [filtroDescuento, setFiltroDescuento] = useState('todos')
   const [cargando, setCargando] = useState(false)
   const [comparendoSeleccionado, setComparendoSeleccionado] = useState(null)
+
+  // Escuchar búsquedas externas desde las alertas del encabezado
+  useEffect(() => {
+    if (busquedaExterna) {
+      setBusqueda(busquedaExterna)
+      setFiltroEstado('todos')
+      setFiltroDescuento('todos')
+      setPaginaActual(1)
+      
+      setCargando(true)
+      apiBackend.obtenerComparendos({
+        pagina: 1,
+        limite: limitePorPagina,
+        busqueda: busquedaExterna,
+        estado_simit: 'todos',
+        filtro_descuento: 'todos'
+      }).then(res => {
+        if (res.exitoso) {
+          setComparendos(res.comparendos || [])
+          setTotalRegistros(res.total_registros || 0)
+          setTotalPaginas(res.total_paginas || 1)
+          if (res.comparendos && res.comparendos.length > 0) {
+            setComparendoSeleccionado(res.comparendos[0])
+          }
+        }
+      }).catch(e => {
+        console.error('Error al aplicar búsqueda de alerta:', e)
+      }).finally(() => {
+        setCargando(false)
+      })
+    }
+  }, [busquedaExterna])
 
   const cargarDatos = async () => {
     setCargando(true)
@@ -111,7 +143,7 @@ export function TablaComparendos() {
         </div>
       </div>
 
-      {/* Tabla */}
+      {/* Tabla Original con Datos Reales */}
       <div className="tabla-envoltorio">
         <table className="tabla-datos">
           <thead>
@@ -160,8 +192,8 @@ export function TablaComparendos() {
                   </td>
                   <td>
                     <span className={`chip-descuento ${
-                      c.etiqueta_descuento.includes('50') ? 'd50' : 
-                      c.etiqueta_descuento.includes('25') ? 'd25' : 'sin'
+                      c.etiqueta_descuento?.includes('50') ? 'd50' : 
+                      c.etiqueta_descuento?.includes('25') ? 'd25' : 'sin'
                     }`}>
                       {c.etiqueta_descuento}
                     </span>

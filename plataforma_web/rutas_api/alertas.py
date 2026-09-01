@@ -99,14 +99,33 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                 for c in sesion.scalars(stmt_nuevos).all()
             ]
 
+            # 3. Comparendos Pagados / Inactivos (Recientemente Saneados)
+            stmt_pagados = select(ComparendoORM).where(
+                ComparendoORM.estado_simit == 'No activo'
+            ).order_by(ComparendoORM.fecha_ultima_actualizacion.desc()).limit(5)
+            
+            comparendos_pagados = [
+                {
+                    "id": c.id,
+                    "placa": c.placa,
+                    "numero_comparendo": c.numero_comparendo,
+                    "codigo_infraccion": c.codigo_infraccion,
+                    "secretaria": c.secretaria,
+                    "valor_total": c.valor_total
+                }
+                for c in sesion.scalars(stmt_pagados).all()
+            ]
+
             return {
                 "exitoso": True,
                 "total_alertas_vencimiento": len(alertas_vencimiento),
                 "total_rojas": sum(1 for a in alertas_vencimiento if a["nivel_alerta"] == "ROJO"),
                 "total_amarillas": sum(1 for a in alertas_vencimiento if a["nivel_alerta"] == "AMARILLO"),
                 "total_nuevos_recientes": len(comparendos_nuevos),
+                "total_pagados_recientes": len(comparendos_pagados),
                 "alertas_vencimiento": alertas_vencimiento,
-                "comparendos_nuevos": comparendos_nuevos
+                "comparendos_nuevos": comparendos_nuevos,
+                "comparendos_pagados": comparendos_pagados
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener alertas: {str(e)}")

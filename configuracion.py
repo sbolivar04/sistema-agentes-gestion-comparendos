@@ -27,6 +27,10 @@ class Configuracion(BaseSettings):
     SUPABASE_URL: str = ""
     GEMINI_API_KEY: str = ""
     
+    # Configuración de GitHub Actions para ejecución en la nube
+    GITHUB_TOKEN: str = ""
+    GITHUB_REPO: str = "sbolivar04/sistema-agentes-gestion-comparendos"
+    
     # Reglas de Negocio Ley Colombiana
     DIAS_HABILES_DESCUENTO_50: int = 11
     DIAS_HABILES_DESCUENTO_25: int = 25
@@ -40,3 +44,31 @@ class Configuracion(BaseSettings):
     )
 
 configuracion = Configuracion()
+
+from datetime import datetime, date, timezone
+from zoneinfo import ZoneInfo
+
+ZONA_HORARIA_COLOMBIA = ZoneInfo("America/Bogota")
+
+def obtener_ahora_colombia() -> datetime:
+    """Retorna fecha y hora actual garantizada en horario de Colombia (America/Bogota)."""
+    return datetime.now(ZONA_HORARIA_COLOMBIA)
+
+def formatear_fecha_colombia(dt: datetime) -> str:
+    """
+    Convierte timestamps almacenados en UTC en Supabase/PostgreSQL 
+    a la zona horaria oficial de Colombia (UTC-5 / America/Bogota).
+    """
+    if not dt:
+        return "Pendiente"
+    if dt.tzinfo is None:
+        dt_utc = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt_utc = dt.astimezone(timezone.utc)
+    
+    dt_col = dt_utc.astimezone(ZONA_HORARIA_COLOMBIA)
+    
+    meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    mes_str = meses[dt_col.month - 1]
+    hora_str = dt_col.strftime("%I:%M %p").lstrip('0')
+    return f"{dt_col.day} {mes_str} • {hora_str}"
