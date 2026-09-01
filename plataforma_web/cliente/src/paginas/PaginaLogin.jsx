@@ -42,13 +42,15 @@ export function PaginaLogin() {
       </button>
 
       <div className="login-tarjeta">
-        <img src="/logo-fscr.png" alt="FSCR Ingeniería Logo" className="login-logo" />
+        <div className="login-logo-contenedor">
+          <img src="/logo-fscr.png" alt="FSCR Ingeniería S.A.S." className="login-logo" />
+        </div>
         
-        <h2 style={{ fontFamily: 'var(--fuente-titulos)', fontSize: '1.5rem', fontWeight: '700' }}>
-          Sistema Inteligente de Comparendos
+        <h2 style={{ fontFamily: 'var(--fuente-titulos)', fontSize: '1.3rem', fontWeight: '700', color: 'var(--texto-principal)', marginTop: '0.1rem' }}>
+          Gestión de Comparendos
         </h2>
-        <p style={{ color: 'var(--texto-secundario)', fontSize: '0.85rem', marginTop: '0.35rem' }}>
-          Gestión preventiva y seguimiento legal de flota vehicular en Colombia (SIMIT)
+        <p style={{ color: 'var(--texto-secundario)', fontSize: '0.8rem', marginTop: '0.15rem', marginBottom: '0.65rem' }}>
+          Gestión preventiva y seguimiento legal de flota (SIMIT)
         </p>
 
         {error && (
@@ -56,32 +58,30 @@ export function PaginaLogin() {
             background: 'var(--color-peligro-rojo-suave)',
             border: '1px solid #fca5a5',
             color: '#991b1b',
-            padding: '0.75rem',
+            padding: '0.6rem 0.75rem',
             borderRadius: 'var(--radio-md)',
-            marginTop: '1.25rem',
+            marginBottom: '1rem',
             display: 'flex',
             alignItems: 'center',
             gap: '0.5rem',
-            fontSize: '0.85rem'
+            fontSize: '0.8rem'
           }}>
-            <AlertCircle size={16} />
+            <AlertCircle size={15} />
             <span>{error}</span>
           </div>
         )}
 
         <form onSubmit={manejarEnvio} className="login-formulario">
           <div className="campo-grupo">
-            <label>Correo Electrónico Corporativo</label>
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-              <input
-                type="email"
-                className="campo-input"
-                placeholder="ejemplo@fscr.com.co"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
+            <label>Correo Electrónico</label>
+            <input
+              type="email"
+              className="campo-input"
+              placeholder="usuario@fscr.com.co"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
           </div>
 
           <div className="campo-grupo">
@@ -99,26 +99,16 @@ export function PaginaLogin() {
           <button 
             type="submit" 
             className="boton-primario" 
-            style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem' }}
+            style={{ width: '100%', justifyContent: 'center', marginTop: '0.75rem', padding: '0.75rem', fontSize: '0.9rem' }}
             disabled={cargando}
           >
-            <LogIn size={18} />
+            <LogIn size={17} />
             {cargando ? 'Ingresando...' : 'Iniciar Sesión'}
-          </button>
-
-          <button
-            type="button"
-            className="boton-secundario"
-            style={{ width: '100%', justifyContent: 'center', fontSize: '0.85rem' }}
-            onClick={accesoRapido}
-          >
-            <ShieldCheck size={16} color="var(--color-primario)" />
-            Ingreso Rápido de Demostración
           </button>
         </form>
 
-        <p style={{ fontSize: '0.75rem', color: 'var(--texto-atenuado)', marginTop: '2rem' }}>
-          FSCR Ingeniería S.A.S. • Control de Operaciones y Flota
+        <p className="login-pie">
+          FSCR Ingeniería S.A.S. • Control de Operaciones
         </p>
       </div>
     </div>

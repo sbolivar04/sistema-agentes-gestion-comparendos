@@ -1,9 +1,6 @@
 name: Extracción Diaria SIMIT y Validación de Comparendos
 
 on:
-  schedule:
-    # Ejecutar todos los días a las 8:05 PM hora Colombia (01:05 UTC)
-    - cron: '5 1 * * *'
   workflow_dispatch:
     inputs:
       criterio:
