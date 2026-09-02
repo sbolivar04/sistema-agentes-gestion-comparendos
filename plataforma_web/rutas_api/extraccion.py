@@ -112,9 +112,24 @@ def consultar_estado_extraccion() -> Dict[str, Any]:
             conclusion = ultimo_run.get("conclusion") # 'success', 'failure', etc.
             
             en_progreso = status in ("queued", "in_progress")
+            
+            estado_mapeado = "en_progreso"
+            mensaje_mapeado = "El agente está consultando la información en SIMIT..."
+            
+            if conclusion == "success":
+                estado_mapeado = "completado"
+                mensaje_mapeado = "¡Extracción completada con éxito! La información ha sido actualizada."
+            elif conclusion == "failure":
+                estado_mapeado = "error"
+                mensaje_mapeado = "El agente tuvo un inconveniente y no pudo completar la consulta. Verifique la conexión o los registros."
+            elif not en_progreso and status == "completed":
+                estado_mapeado = "completado" if conclusion != "failure" else "error"
+
             return {
                 "exitoso": True,
                 "en_progreso": en_progreso,
+                "estado": estado_mapeado,
+                "mensaje": mensaje_mapeado,
                 "run_id": ultimo_run.get("id"),
                 "status": status,
                 "conclusion": conclusion,
@@ -122,4 +137,11 @@ def consultar_estado_extraccion() -> Dict[str, Any]:
                 "updated_at": ultimo_run.get("updated_at")
             }
     except Exception as e:
-        return {"en_progreso": False, "status": "error", "error": str(e)}
+        return {
+            "exitoso": False,
+            "en_progreso": False,
+            "estado": "error",
+            "mensaje": f"Error al verificar estado del agente: {str(e)}",
+            "status": "error",
+            "error": str(e)
+        }

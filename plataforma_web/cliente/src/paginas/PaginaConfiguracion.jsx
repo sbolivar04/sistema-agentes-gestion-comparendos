@@ -32,6 +32,7 @@ export function PaginaConfiguracion() {
   const [cargando, setCargando] = useState(true)
   const [sincronizando, setSincronizando] = useState(false)
   const [mensajeSync, setMensajeSync] = useState('')
+  const [tipoMensajeSync, setTipoMensajeSync] = useState('info') // 'info' | 'exito' | 'error'
   const [chatAbierto, setChatAbierto] = useState(false)
 
   // Filtros de búsqueda
@@ -99,19 +100,6 @@ export function PaginaConfiguracion() {
 
   useEffect(() => {
     cargarDatos()
-    const intervalo = setInterval(cargarDatos, 30000)
-
-    const alCambiarVisibilidad = () => {
-      if (document.visibilityState === 'visible') {
-        cargarDatos()
-      }
-    }
-    document.addEventListener('visibilitychange', alCambiarVisibilidad)
-
-    return () => {
-      clearInterval(intervalo)
-      document.removeEventListener('visibilitychange', alCambiarVisibilidad)
-    }
   }, [])
 
   const mostrarFeedback = (tipo, texto) => {
@@ -123,6 +111,7 @@ export function PaginaConfiguracion() {
 
   const sincronizarSimit = async () => {
     setSincronizando(true)
+    setTipoMensajeSync('info')
     setMensajeSync('Iniciando agente de extracción...')
     
     try {
@@ -135,19 +124,22 @@ export function PaginaConfiguracion() {
           intentos++
           try {
             const estadoRes = await apiBackend.obtenerEstadoExtraccion()
-            if (estadoRes && estadoRes.estado) {
-              if (estadoRes.estado === 'completado') {
+            if (estadoRes) {
+              if (estadoRes.conclusion === 'success' || estadoRes.estado === 'completado') {
                 clearInterval(intervalPoll)
                 setSincronizando(false)
+                setTipoMensajeSync('exito')
                 setMensajeSync('El agente finalizó la extracción y los datos quedaron actualizados.')
                 cargarDatos()
-                setTimeout(() => setMensajeSync(''), 6000)
-              } else if (estadoRes.estado === 'error') {
+                setTimeout(() => setMensajeSync(''), 7000)
+              } else if (estadoRes.conclusion === 'failure' || estadoRes.estado === 'error') {
                 clearInterval(intervalPoll)
                 setSincronizando(false)
-                setMensajeSync('El agente reportó una novedad durante la ejecución.')
-                setTimeout(() => setMensajeSync(''), 6000)
-              } else {
+                setTipoMensajeSync('error')
+                setMensajeSync(estadoRes.mensaje || 'El agente reportó un inconveniente al consultar SIMIT. No fue posible completar la extracción.')
+                setTimeout(() => setMensajeSync(''), 9000)
+              } else if (estadoRes.en_progreso) {
+                setTipoMensajeSync('info')
                 setMensajeSync(estadoRes.mensaje || 'El agente continúa extrayendo información...')
               }
             }
@@ -158,20 +150,23 @@ export function PaginaConfiguracion() {
           if (intentos > 40) {
             clearInterval(intervalPoll)
             setSincronizando(false)
+            setTipoMensajeSync('info')
             setMensajeSync('El agente sigue procesando. Los datos se actualizarán automáticamente.')
             setTimeout(() => setMensajeSync(''), 6000)
           }
         }, 3000)
       } else {
         setSincronizando(false)
+        setTipoMensajeSync('error')
         setMensajeSync(res?.mensaje || 'No fue posible iniciar el agente.')
-        setTimeout(() => setMensajeSync(''), 5000)
+        setTimeout(() => setMensajeSync(''), 6000)
       }
     } catch (e) {
       console.error('Error al sincronizar:', e)
       setSincronizando(false)
+      setTipoMensajeSync('error')
       setMensajeSync('No fue posible comunicarse con el servicio en este momento.')
-      setTimeout(() => setMensajeSync(''), 5000)
+      setTimeout(() => setMensajeSync(''), 6000)
     }
   }
 
@@ -380,9 +375,17 @@ export function PaginaConfiguracion() {
         {/* Notificación de Sincronización */}
         {mensajeSync && (
           <div style={{
-            background: 'var(--color-exito-suave)',
-            border: '1px solid #6ee7b7',
-            color: '#065f46',
+            background: tipoMensajeSync === 'error' 
+              ? 'var(--color-peligro-suave)' 
+              : tipoMensajeSync === 'info' 
+              ? 'var(--azul-suave)' 
+              : 'var(--color-exito-suave)',
+            border: `1px solid ${tipoMensajeSync === 'error' ? '#fca5a5' : tipoMensajeSync === 'info' ? '#93c5fd' : '#6ee7b7'}`,
+            color: tipoMensajeSync === 'error' 
+              ? 'var(--color-peligro-rojo)' 
+              : tipoMensajeSync === 'info' 
+              ? 'var(--azul-primario)' 
+              : '#065f46',
             padding: '0.75rem 1.25rem',
             borderRadius: 'var(--radio-md)',
             marginBottom: '1.5rem',
@@ -392,7 +395,13 @@ export function PaginaConfiguracion() {
             fontSize: '0.9rem',
             fontWeight: 600
           }}>
-            <CheckCircle2 size={18} />
+            {tipoMensajeSync === 'error' ? (
+              <AlertTriangle size={18} />
+            ) : tipoMensajeSync === 'info' ? (
+              <RefreshCw size={18} className="spin-animation" />
+            ) : (
+              <CheckCircle2 size={18} />
+            )}
             <span>{mensajeSync}</span>
           </div>
         )}
