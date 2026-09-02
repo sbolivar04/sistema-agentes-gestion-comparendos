@@ -23,6 +23,7 @@ import {
 import { BarraNavegacion } from '../componentes/BarraNavegacion'
 import { ChatAgenteIA } from '../componentes/ChatAgenteIA'
 import { EtiquetaTooltip } from '../componentes/EtiquetaTooltip'
+import { ModalConfirmacion } from '../componentes/ModalConfirmacion'
 import { apiBackend } from '../servicios/apiBackend'
 
 export function PaginaConfiguracion() {
@@ -52,6 +53,11 @@ export function PaginaConfiguracion() {
     activo: true
   })
   const [guardando, setGuardando] = useState(false)
+
+  // Estado de Modal de Confirmación de Eliminación
+  const [entidadAEliminar, setEntidadAEliminar] = useState(null)
+  const [modalEliminarAbierto, setModalEliminarAbierto] = useState(false)
+  const [eliminando, setEliminando] = useState(false)
 
   // Estado de Programación Cron del Agente (cron.job)
   const [programacion, setProgramacion] = useState({
@@ -294,20 +300,32 @@ export function PaginaConfiguracion() {
     }
   }
 
-  // Eliminar Entidad
-  const eliminarEntidad = async (entidad) => {
-    if (!window.confirm(`¿Estás seguro de que deseas eliminar la entidad "${entidad.nombre_entidad}"? Ya no será consultada por el agente.`)) {
-      return
-    }
+  // Solicitar Confirmación para Eliminar Entidad
+  const solicitarEliminarEntidad = (entidad) => {
+    setEntidadAEliminar(entidad)
+    setModalEliminarAbierto(true)
+  }
 
+  // Ejecutar Eliminación Confirmada
+  const confirmarEliminarEntidad = async () => {
+    if (!entidadAEliminar) return
+    setEliminando(true)
     try {
-      const res = await apiBackend.eliminarEntidad(entidad.id)
+      const res = await apiBackend.eliminarEntidad(entidadAEliminar.id)
       if (res && res.exitoso) {
-        mostrarFeedback('exito', `Entidad "${entidad.nombre_entidad}" eliminada correctamente.`)
+        setEntidades(prev => prev.filter(e => e.id !== entidadAEliminar.id))
+        mostrarFeedback('exito', `Entidad "${entidadAEliminar.nombre_entidad}" eliminada correctamente.`)
+        setModalEliminarAbierto(false)
+        setEntidadAEliminar(null)
         await cargarDatos()
+      } else {
+        mostrarFeedback('error', res?.mensaje || 'No fue posible eliminar la entidad.')
       }
     } catch (err) {
+      console.error('Error al eliminar entidad:', err)
       mostrarFeedback('error', 'No fue posible eliminar la entidad.')
+    } finally {
+      setEliminando(false)
     }
   }
 
@@ -783,7 +801,7 @@ export function PaginaConfiguracion() {
                             
                             <EtiquetaTooltip texto="Eliminar entidad">
                               <button
-                                onClick={() => eliminarEntidad(entidad)}
+                                onClick={() => solicitarEliminarEntidad(entidad)}
                                 className="boton-icono"
                                 style={{ width: '32px', height: '32px', color: 'var(--color-peligro-rojo)', background: 'var(--color-peligro-rojo-suave)', borderColor: '#fca5a5' }}
                               >
@@ -1079,6 +1097,29 @@ export function PaginaConfiguracion() {
           </div>
         </div>
       )}
+
+      {/* Modal Reutilizable de Confirmación para Eliminación */}
+      <ModalConfirmacion
+        abierto={modalEliminarAbierto}
+        alCerrar={() => {
+          if (!eliminando) {
+            setModalEliminarAbierto(false)
+            setEntidadAEliminar(null)
+          }
+        }}
+        alConfirmar={confirmarEliminarEntidad}
+        titulo="¿Eliminar entidad de consulta?"
+        mensaje="Esta entidad dejará de ser consultada por el agente autónomo en las extracciones del SIMIT. Los comparendos históricos ya registrados en el sistema no se borrarán."
+        textoConfirmar="Sí, Eliminar"
+        textoCancelar="Cancelar"
+        tipo="peligro"
+        cargando={eliminando}
+        detalle={entidadAEliminar ? {
+          etiqueta: 'Entidad a eliminar:',
+          valor: entidadAEliminar.nombre_entidad,
+          subvalor: `${entidadAEliminar.tipo_documento || 'Doc'}: ${entidadAEliminar.criterio_busqueda}`
+        } : null}
+      />
 
       {/* Botón Flotante para Asistente IA */}
       <EtiquetaTooltip texto="Abrir Asistente IA" posicion="izquierda">

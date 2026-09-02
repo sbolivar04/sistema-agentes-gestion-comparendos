@@ -474,6 +474,121 @@ body {
 }
 
 /* ==========================================================================
+   COMPONENTE REUTILIZABLE: MODAL DE CONFIRMACIÓN CORPORATIVO
+   ========================================================================== */
+.modal-caja-confirmacion {
+  background: var(--fondo-tarjeta);
+  border: 1px solid var(--borde-tarjeta);
+  border-radius: var(--radio-lg);
+  padding: 1.6rem 1.6rem 1.4rem;
+  width: 100%;
+  max-width: 440px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.38);
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
+}
+
+.modal-confirmacion-btn-cerrar {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  background: transparent;
+  border: none;
+  color: var(--texto-atenuado);
+  cursor: pointer;
+  padding: 0.35rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.modal-confirmacion-btn-cerrar:hover {
+  background: var(--fondo-elevado);
+  color: var(--texto-principal);
+}
+
+.modal-confirmacion-icono-circulo {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+
+.modal-confirmacion-cuerpo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: 100%;
+  margin-bottom: 1.25rem;
+}
+
+.modal-confirmacion-titulo {
+  font-family: var(--fuente-titulos);
+  font-size: 1.18rem;
+  font-weight: 700;
+  color: var(--texto-principal);
+  margin: 0;
+}
+
+.modal-confirmacion-mensaje {
+  font-size: 0.86rem;
+  color: var(--texto-secundario);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.modal-confirmacion-detalle {
+  margin-top: 0.75rem;
+  background: var(--fondo-elevado);
+  border: 1px solid var(--borde-tarjeta);
+  border-radius: var(--radio-md);
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: left;
+}
+
+.modal-confirmacion-detalle-etiqueta {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--texto-atenuado);
+}
+
+.modal-confirmacion-detalle-valor {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--texto-principal);
+}
+
+.modal-confirmacion-detalle-subvalor {
+  font-size: 0.8rem;
+  color: var(--texto-secundario);
+}
+
+.modal-confirmacion-acciones {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+/* ==========================================================================
    COMPONENTE ESTANDARIZADO DE TOOLTIPS / ETIQUETAS HOVER FLOTANTES
    ========================================================================== */
 .etiqueta-tooltip-contenedor {
