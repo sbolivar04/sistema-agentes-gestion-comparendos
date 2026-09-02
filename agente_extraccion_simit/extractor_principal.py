@@ -48,6 +48,10 @@ def ejecutar_extraccion(criterio: str, tipo_consulta: str, sin_interfaz: bool = 
         print(f"\n[ERROR / RESPUESTA DE SIMIT]: {resultado.mensaje_error}")
         return resultado
 
+    if resultado.mensaje_error and "Requiere configurar" in resultado.mensaje_error:
+        print(f"\n[AVISO DEL AGENTE]: El documento {criterio} requiere que se defina si es NIT o Cédula en la plataforma web. Se generó la alerta para su configuración.")
+        return resultado
+
     # 4. Guardar en Base de Datos (Supabase)
     print("\n[PASO 2] Persistiendo y actualizando datos en Supabase Cloud (comparendos_fscr)...")
     with obtener_sesion_bd() as sesion:

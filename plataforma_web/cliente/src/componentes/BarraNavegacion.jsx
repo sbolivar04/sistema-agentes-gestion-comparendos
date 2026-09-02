@@ -4,6 +4,7 @@ import { useAutenticacion } from '../contexto/ContextoAutenticacion'
 import { 
   Sun, Moon, Bell, Power, RefreshCw, ChevronDown, Clock
 } from 'lucide-react'
+import { EtiquetaTooltip } from './EtiquetaTooltip'
 
 export function BarraNavegacion({ alertas = {}, ultimaSincronizacion, alSincronizar, cargandoSincronizacion, alAbrirChat }) {
   const { alternarTema, esOscuro } = useTema()
@@ -12,7 +13,7 @@ export function BarraNavegacion({ alertas = {}, ultimaSincronizacion, alSincroni
   const [menuPerfilAbierto, setMenuPerfilAbierto] = useState(false)
   const [mostrarModalLogout, setMostrarModalLogout] = useState(false)
 
-  const totalAlertas = (alertas.total_rojas || 0) + (alertas.total_amarillas || 0) + (alertas.total_nuevos_recientes || 0)
+  const totalAlertas = (alertas.total_rojas || 0) + (alertas.total_amarillas || 0) + (alertas.total_nuevos_recientes || 0) + (alertas.total_alertas_configuracion || 0)
 
   return (
     <header className="barra-navegacion">
@@ -24,43 +25,47 @@ export function BarraNavegacion({ alertas = {}, ultimaSincronizacion, alSincroni
 
       <div className="nav-acciones">
         {/* Fecha y Hora de Última Sincronización SIMIT Real (Horario Colombia UTC-5) */}
-        <div className="badge-sincronizacion-top" title="Estado de sincronización con la plataforma SIMIT (Horario Colombia)">
-          <Clock size={13} className={`icono-sincro-reloj ${cargandoSincronizacion ? 'spin-animation' : ''}`} />
-          <span>
-            {cargandoSincronizacion ? 'Sincronizando...' : `Sincronizado: ${ultimaSincronizacion || 'Actualizando...'}`}
-          </span>
-        </div>
+        <EtiquetaTooltip texto="Estado de sincronización con la plataforma SIMIT (Horario Colombia)">
+          <div className="badge-sincronizacion-top">
+            <Clock size={13} className={`icono-sincro-reloj ${cargandoSincronizacion ? 'spin-animation' : ''}`} />
+            <span>
+              {cargandoSincronizacion ? 'Sincronizando...' : `Sincronizado: ${ultimaSincronizacion || 'Actualizando...'}`}
+            </span>
+          </div>
+        </EtiquetaTooltip>
 
         {/* Botón Sincronizar SIMIT */}
-        <button 
-          className="boton-secundario" 
-          style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem' }}
-          onClick={alSincronizar}
-          disabled={cargandoSincronizacion}
-          title="Sincronizar SIMIT en vivo"
-        >
-          <RefreshCw size={14} className={cargandoSincronizacion ? 'spin-animation' : ''} />
-          <span>{cargandoSincronizacion ? 'Sincronizando...' : 'Actualizar SIMIT'}</span>
-        </button>
+        <EtiquetaTooltip texto="Sincronizar comparendos SIMIT en vivo">
+          <button 
+            className="boton-secundario" 
+            style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem' }}
+            onClick={alSincronizar}
+            disabled={cargandoSincronizacion}
+          >
+            <RefreshCw size={14} className={cargandoSincronizacion ? 'spin-animation' : ''} />
+            <span>{cargandoSincronizacion ? 'Sincronizando...' : 'Actualizar SIMIT'}</span>
+          </button>
+        </EtiquetaTooltip>
 
         {/* Campana de Notificaciones y Alertas */}
         <div style={{ position: 'relative' }}>
-          <button 
-            className="boton-icono" 
-            onClick={() => setMostrarNotificaciones(!mostrarNotificaciones)}
-            title="Centro de Alertas de Vencimiento"
-          >
-            <Bell size={17} />
-            {totalAlertas > 0 && (
-              <span className="badge-notificacion">{totalAlertas}</span>
-            )}
-          </button>
+          <EtiquetaTooltip texto="Notificación">
+            <button 
+              className="boton-icono" 
+              onClick={() => setMostrarNotificaciones(!mostrarNotificaciones)}
+            >
+              <Bell size={17} />
+              {totalAlertas > 0 && (
+                <span className="badge-notificacion">{totalAlertas}</span>
+              )}
+            </button>
+          </EtiquetaTooltip>
 
           {/* Menú Desplegable de Notificaciones */}
           {mostrarNotificaciones && (
             <div className="menu-desplegable-notificaciones">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid var(--borde-tarjeta)', paddingBottom: '0.5rem' }}>
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 700 }}>Alertas de Flota</h4>
+                <h4 style={{ fontSize: '0.9rem', fontWeight: 700 }}>Alertas del Sistema</h4>
                 <span style={{ fontSize: '0.75rem', color: 'var(--texto-secundario)' }}>{totalAlertas} pendientes</span>
               </div>
 
@@ -70,6 +75,29 @@ export function BarraNavegacion({ alertas = {}, ultimaSincronizacion, alSincroni
                 </p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {/* Alertas de Configuración de Entidades */}
+                  {alertas.alertas_configuracion?.map((item) => (
+                    <div 
+                      key={`config-${item.id}`}
+                      style={{
+                        padding: '0.65rem',
+                        borderRadius: 'var(--radio-md)',
+                        background: 'rgba(245, 158, 11, 0.15)',
+                        border: '1px solid #f59e0b',
+                        fontSize: '0.78rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#b45309' }}>
+                        <span>⚠️ Configurar Tipo Documento</span>
+                        <span>{item.criterio_busqueda}</span>
+                      </div>
+                      <p style={{ marginTop: '0.2rem', color: '#92400e', margin: 0 }}>
+                        {item.nombre_entidad} requiere definir si es NIT o Cédula.
+                      </p>
+                    </div>
+                  ))}
+
+                  {/* Alertas de Vencimiento de Comparendos */}
                   {alertas.alertas_vencimiento?.slice(0, 5).map((alerta) => (
                     <div 
                       key={alerta.id}
@@ -85,7 +113,7 @@ export function BarraNavegacion({ alertas = {}, ultimaSincronizacion, alSincroni
                         <span>Placa: {alerta.placa} ({alerta.tipo_descuento})</span>
                         <span>{alerta.dias_habiles_restantes} días hábiles</span>
                       </div>
-                      <p style={{ marginTop: '0.2rem', color: alerta.nivel_alerta === 'ROJO' ? '#991b1b' : '#92400e' }}>
+                      <p style={{ marginTop: '0.2rem', color: alerta.nivel_alerta === 'ROJO' ? '#991b1b' : '#92400e', margin: 0 }}>
                         {alerta.mensaje_urgencia}. Ahorro: ${alerta.ahorro_en_juego.toLocaleString('es-CO')} COP
                       </p>
                     </div>
@@ -97,13 +125,14 @@ export function BarraNavegacion({ alertas = {}, ultimaSincronizacion, alSincroni
         </div>
 
         {/* Switch Blanco / Oscuro */}
-        <button 
-          className="boton-icono" 
-          onClick={alternarTema}
-          title={esOscuro ? 'Cambiar a Modo Blanco' : 'Cambiar a Modo Oscuro'}
-        >
-          {esOscuro ? <Sun size={17} /> : <Moon size={17} />}
-        </button>
+        <EtiquetaTooltip texto={esOscuro ? 'Cambiar a Modo Blanco' : 'Cambiar a Modo Oscuro'}>
+          <button 
+            className="boton-icono" 
+            onClick={alternarTema}
+          >
+            {esOscuro ? <Sun size={17} /> : <Moon size={17} />}
+          </button>
+        </EtiquetaTooltip>
 
         {/* =========================================================================
             PERFIL CORPORATIVO CON MENÚ DESPLEGABLE (DROPDOWN)
@@ -112,7 +141,6 @@ export function BarraNavegacion({ alertas = {}, ultimaSincronizacion, alSincroni
           <div 
             className="perfil-usuario-capsula"
             onClick={() => setMenuPerfilAbierto(!menuPerfilAbierto)}
-            title="Opciones de usuario"
           >
             <div className="avatar-usuario-contenedor">
               <div className="avatar-usuario-circulo">

@@ -5,6 +5,7 @@ import { PanelAlertas } from '../componentes/PanelAlertas'
 import { GraficasTemporales } from '../componentes/GraficasTemporales'
 import { TablaComparendos } from '../componentes/TablaComparendos'
 import { ChatAgenteIA } from '../componentes/ChatAgenteIA'
+import { EtiquetaTooltip } from '../componentes/EtiquetaTooltip'
 import { apiBackend } from '../servicios/apiBackend'
 import { MessageSquare, RefreshCw, Sparkles, CheckCircle2 } from 'lucide-react'
 
@@ -124,21 +125,24 @@ export function PaginaDashboard() {
       />
 
       <main className="contenido-principal">
-        {/* Cabecera del Dashboard */}
-        <div className="encabezado-dashboard">
-          <div>
+        {/* Cabecera del Dashboard 100% Estandarizada */}
+        <div className="encabezado-dashboard-con-alertas">
+          <div className="encabezado-titulos-izquierda">
             <h2>Panel Ejecutivo de Flota Vehicular</h2>
             <p>Control financiero, liquidación de descuentos y auditoría legal en tiempo real</p>
           </div>
 
-          <div className="botones-cabecera">
-            <button 
-              className="boton-primario"
-              onClick={() => setChatAbierto(true)}
-            >
-              <Sparkles size={18} />
-              <span>Consultar con Asistente IA</span>
-            </button>
+          <div className="encabezado-alertas-derecha">
+            <EtiquetaTooltip texto="Consultar análisis o dudas legales con el Agente de IA">
+              <button 
+                className="boton-primario"
+                onClick={() => setChatAbierto(true)}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
+              >
+                <Sparkles size={16} />
+                <span>Consultar con Asistente IA</span>
+              </button>
+            </EtiquetaTooltip>
           </div>
         </div>
 
@@ -176,13 +180,14 @@ export function PaginaDashboard() {
       </main>
 
       {/* Botón Flotante para Asistente IA */}
-      <button 
-        className="chat-flotante-boton"
-        onClick={() => setChatAbierto(!chatAbierto)}
-        title="Abrir Asistente IA"
-      >
-        <MessageSquare size={26} />
-      </button>
+      <EtiquetaTooltip texto="Abrir Asistente IA" posicion="izquierda">
+        <button 
+          className="chat-flotante-boton"
+          onClick={() => setChatAbierto(!chatAbierto)}
+        >
+          <MessageSquare size={26} />
+        </button>
+      </EtiquetaTooltip>
 
       {/* Ventana de Chat Flotante */}
       <ChatAgenteIA 

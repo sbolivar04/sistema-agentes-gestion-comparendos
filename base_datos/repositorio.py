@@ -4,7 +4,7 @@ from typing import List, Tuple, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
-from base_datos.modelos import ComparendoORM, LogExtraccionORM, PreferenciaConsultaORM
+from base_datos.modelos import ComparendoORM, LogExtraccionORM, EntidadConsultaORM, PreferenciaConsultaORM
 
 logger = logging.getLogger(__name__)
 
@@ -138,26 +138,138 @@ class RepositorioBaseDatos:
         self.session.flush()
         return log
 
-    def obtener_preferencia_documento(self, criterio: str) -> str:
-        """Obtiene la preferencia de tipo de documento para un criterio específico."""
-        preferencia = self.session.scalar(
-            select(PreferenciaConsultaORM).where(PreferenciaConsultaORM.criterio_busqueda == criterio)
+    # =========================================================================
+    # GESTIÓN CONSOLIDADA DE ENTIDADES Y PREFERENCIAS DE CONSULTA
+    # =========================================================================
+
+    def obtener_entidades_consulta(self, solo_activas: bool = False) -> List[EntidadConsultaORM]:
+        """Obtiene el listado de entidades registradas para consulta y monitoreo."""
+        stmt = select(EntidadConsultaORM).order_by(EntidadConsultaORM.id.asc())
+        if solo_activas:
+            stmt = stmt.where(EntidadConsultaORM.activo == True)
+        return list(self.session.scalars(stmt).all())
+
+    def obtener_entidad_por_id(self, id_entidad: int) -> Optional[EntidadConsultaORM]:
+        """Obtiene una entidad por su ID primario."""
+        return self.session.get(EntidadConsultaORM, id_entidad)
+
+    def obtener_entidad_por_criterio(self, criterio: str) -> Optional[EntidadConsultaORM]:
+        """Obtiene una entidad por su número de documento o criterio de búsqueda."""
+        criterio_limpio = str(criterio).replace("-", "").strip()
+        return self.session.scalar(
+            select(EntidadConsultaORM).where(EntidadConsultaORM.criterio_busqueda == criterio_limpio)
         )
-        return preferencia.tipo_documento if preferencia else None
+
+    def crear_entidad_consulta(
+        self,
+        nombre_entidad: str,
+        criterio_busqueda: str,
+        tipo_documento: str = "NIT",
+        activo: bool = True
+    ) -> EntidadConsultaORM:
+        """Crea y registra una nueva entidad para monitoreo y consulta de comparendos."""
+        criterio_limpio = str(criterio_busqueda).replace("-", "").strip()
+        existente = self.obtener_entidad_por_criterio(criterio_limpio)
+        if existente:
+            existente.nombre_entidad = nombre_entidad.strip()
+            existente.tipo_documento = tipo_documento.strip()
+            existente.activo = activo
+            existente.requiere_desambiguacion = False
+            self.session.flush()
+            return existente
+
+        nueva_entidad = EntidadConsultaORM(
+            nombre_entidad=nombre_entidad.strip(),
+            criterio_busqueda=criterio_limpio,
+            tipo_documento=tipo_documento.strip(),
+            activo=activo,
+            requiere_desambiguacion=False
+        )
+        self.session.add(nueva_entidad)
+        self.session.flush()
+        return nueva_entidad
+
+    def actualizar_entidad_consulta(
+        self,
+        id_entidad: int,
+        nombre_entidad: str = None,
+        criterio_busqueda: str = None,
+        tipo_documento: str = None,
+        activo: bool = None
+    ) -> Optional[EntidadConsultaORM]:
+        """Actualiza los datos de una entidad existente."""
+        entidad = self.obtener_entidad_por_id(id_entidad)
+        if not entidad:
+            return None
+
+        if nombre_entidad is not None:
+            entidad.nombre_entidad = nombre_entidad.strip()
+        if criterio_busqueda is not None:
+            entidad.criterio_busqueda = str(criterio_busqueda).replace("-", "").strip()
+        if tipo_documento is not None:
+            entidad.tipo_documento = tipo_documento.strip()
+            # Si el usuario asigna un tipo válido, se apaga la alerta de desambiguación
+            if entidad.tipo_documento in ["NIT", "Cédula", "Cédula de Ciudadanía"]:
+                entidad.requiere_desambiguacion = False
+        if activo is not None:
+            entidad.activo = activo
+
+        entidad.fecha_actualizacion = datetime.utcnow()
+        self.session.flush()
+        return entidad
+
+    def eliminar_entidad_consulta(self, id_entidad: int) -> bool:
+        """Elimina una entidad de la tabla de consultas."""
+        entidad = self.obtener_entidad_por_id(id_entidad)
+        if not entidad:
+            return False
+        self.session.delete(entidad)
+        self.session.flush()
+        return True
+
+    def marcar_desambiguacion_requerida(self, criterio: str):
+        """Marca una entidad como requiriente de desambiguación tras detección por el agente."""
+        entidad = self.obtener_entidad_por_criterio(criterio)
+        if entidad:
+            entidad.requiere_desambiguacion = True
+            entidad.fecha_actualizacion = datetime.utcnow()
+            self.session.flush()
+
+    def resolver_desambiguacion(self, id_entidad: int, tipo_documento: str) -> Optional[EntidadConsultaORM]:
+        """Resuelve la alerta de desambiguación asignando el tipo de documento elegido por el usuario."""
+        entidad = self.obtener_entidad_por_id(id_entidad)
+        if entidad:
+            entidad.tipo_documento = tipo_documento.strip()
+            entidad.requiere_desambiguacion = False
+            entidad.fecha_actualizacion = datetime.utcnow()
+            self.session.flush()
+            return entidad
+        return None
+
+    def obtener_preferencia_documento(self, criterio: str) -> Optional[str]:
+        """Obtiene el tipo de documento configurado para un criterio."""
+        entidad = self.obtener_entidad_por_criterio(criterio)
+        if entidad and entidad.tipo_documento and entidad.tipo_documento not in ["Pendiente", "Sin especificar"]:
+            return entidad.tipo_documento
+        return None
 
     def guardar_preferencia_documento(self, criterio: str, tipo_documento: str):
-        """Guarda o actualiza la preferencia de tipo de documento para un criterio."""
-        preferencia = self.session.scalar(
-            select(PreferenciaConsultaORM).where(PreferenciaConsultaORM.criterio_busqueda == criterio)
-        )
-        if preferencia:
-            preferencia.tipo_documento = tipo_documento
+        """Guarda o actualiza el tipo de documento para un criterio."""
+        criterio_limpio = str(criterio).replace("-", "").strip()
+        entidad = self.obtener_entidad_por_criterio(criterio_limpio)
+        if entidad:
+            entidad.tipo_documento = tipo_documento.strip()
+            entidad.requiere_desambiguacion = False
+            entidad.fecha_actualizacion = datetime.utcnow()
         else:
-            nueva_preferencia = PreferenciaConsultaORM(
-                criterio_busqueda=criterio,
-                tipo_documento=tipo_documento
+            nueva = EntidadConsultaORM(
+                nombre_entidad=f"Empresa NIT {criterio_limpio}",
+                criterio_busqueda=criterio_limpio,
+                tipo_documento=tipo_documento.strip(),
+                activo=True,
+                requiere_desambiguacion=False
             )
-            self.session.add(nueva_preferencia)
+            self.session.add(nueva)
         self.session.flush()
 
     def obtener_resumen_flota(self, criterio_busqueda: str = None) -> Dict[str, Any]:

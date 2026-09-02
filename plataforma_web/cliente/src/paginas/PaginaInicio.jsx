@@ -3,50 +3,71 @@ import { BarraNavegacion } from '../componentes/BarraNavegacion'
 import { TarjetasKPI } from '../componentes/TarjetasKPI'
 import { TablaComparendos } from '../componentes/TablaComparendos'
 import { ChatAgenteIA } from '../componentes/ChatAgenteIA'
+import { EtiquetaTooltip } from '../componentes/EtiquetaTooltip'
 import { apiBackend } from '../servicios/apiBackend'
 import { 
   MessageSquare, CheckCircle2, Sparkles, Clock, ArrowRight, 
   ChevronLeft, ChevronRight, CheckCheck
 } from 'lucide-react'
 
-export function PaginaInicio() {
-  const [metricas, setMetricas] = useState({})
-  const [alertas, setAlertas] = useState({})
-  const [cargando, setCargando] = useState(true)
+export function PaginaInicio({ alNavegarAConfiguracion }) {
+  const [metricas, setMetricas] = useState({
+    total_comparendos: 0,
+    monto_total: 0,
+    total_ahorro_potencial: 0,
+    alertas_activas: 0,
+    total_descuento_50: 0,
+    total_descuento_25: 0,
+    total_sin_descuento: 0,
+    ultima_sincronizacion: ''
+  })
+  const [alertas, setAlertas] = useState({
+    alertas_vencimiento: [],
+    comparendos_nuevos: [],
+    comparendos_pagados: [],
+    alertas_configuracion: [],
+    total_alertas_configuracion: 0
+  })
+  const [chatAbierto, setChatAbierto] = useState(false)
   const [sincronizando, setSincronizando] = useState(false)
   const [mensajeSync, setMensajeSync] = useState('')
-  const [chatAbierto, setChatAbierto] = useState(false)
   const [indiceRotativo, setIndiceRotativo] = useState(0)
   const [versionTabla, setVersionTabla] = useState(0)
 
-  const cargarDatosInicio = async () => {
+  // Cargar datos reales de backend
+  const cargarDatos = async () => {
     try {
-      const [resKPIs, resAlertas] = await Promise.all([
-        apiBackend.obtenerKPIs(),
-        apiBackend.obtenerAlertas()
-      ])
+      const resKPIs = await apiBackend.obtenerKPIs()
+      if (resKPIs) {
+        setMetricas({
+          total_comparendos: resKPIs.total_comparendos || 0,
+          monto_total: resKPIs.monto_total || 0,
+          total_ahorro_potencial: resKPIs.total_ahorro_potencial || 0,
+          alertas_activas: resKPIs.total_alertas_activas || 0,
+          total_descuento_50: resKPIs.total_descuento_50 || 0,
+          total_descuento_25: resKPIs.total_descuento_25 || 0,
+          total_sin_descuento: resKPIs.total_sin_descuento || 0,
+          ultima_sincronizacion: resKPIs.ultima_sincronizacion || ''
+        })
+      }
 
-      if (resKPIs.exitoso) setMetricas(resKPIs)
-      if (resAlertas.exitoso) setAlertas(resAlertas)
+      const resAlertas = await apiBackend.obtenerAlertas()
+      if (resAlertas) {
+        setAlertas(resAlertas)
+      }
     } catch (e) {
-      console.error('Error cargando datos de inicio:', e)
-    } finally {
-      setCargando(false)
+      console.error('Error al cargar datos de backend:', e)
     }
   }
 
+  // Refrescar al montar y cada 30 segundos
   useEffect(() => {
-    cargarDatosInicio()
+    cargarDatos()
+    const intervalo = setInterval(cargarDatos, 30000)
 
-    // Polling en tiempo real cada 30 segundos
-    const intervalo = setInterval(() => {
-      cargarDatosInicio()
-    }, 30000)
-
-    // Recargar inmediatamente al volver a la pestaña
     const alCambiarVisibilidad = () => {
       if (document.visibilityState === 'visible') {
-        cargarDatosInicio()
+        cargarDatos()
       }
     }
     document.addEventListener('visibilitychange', alCambiarVisibilidad)
@@ -108,55 +129,55 @@ export function PaginaInicio() {
 
   const sincronizarSimit = async () => {
     setSincronizando(true)
-    setMensajeSync('El agente está iniciando la consulta de comparendos en el SIMIT...')
+    setMensajeSync('Iniciando agente de extracción...')
+    
     try {
-      const res = await apiBackend.lanzarExtraccion()
-      if (!res.exitoso) {
-        setMensajeSync(res.mensaje || 'No fue posible iniciar la consulta en este momento.')
-        setSincronizando(false)
-        setTimeout(() => setMensajeSync(''), 5000)
-        return
-      }
-
-      setMensajeSync('El agente está verificando el estado de la flota en el SIMIT en vivo...')
-
-      // Esperar 4 segundos antes de iniciar el monitoreo para que comience la consulta
-      await new Promise(resolve => setTimeout(resolve, 4000))
-
-      const tiempoInicio = Date.now()
-      const intervaloEstado = setInterval(async () => {
-        try {
-          // Timeout de seguridad a los 3.5 minutos
-          if (Date.now() - tiempoInicio > 210000) {
-            clearInterval(intervaloEstado)
-            setSincronizando(false)
-            setMensajeSync('La consulta está tomando un poco más de tiempo de lo habitual. En breve verás los datos actualizados.')
-            setTimeout(() => setMensajeSync(''), 6000)
-            return
-          }
-
-          const estado = await apiBackend.obtenerEstadoExtraccion()
-          if (estado && !estado.en_progreso) {
-            clearInterval(intervaloEstado)
-            setSincronizando(false)
-            if (estado.conclusion === 'success') {
-              setMensajeSync('¡Sincronización completada! Los comparendos de la flota se han actualizado correctamente.')
-              await cargarDatosInicio()
-              setVersionTabla(v => v + 1)
-            } else {
-              setMensajeSync('La consulta ha finalizado. Los datos disponibles ya están actualizados.')
-              await cargarDatosInicio()
+      const res = await apiBackend.lanzarExtraccion('', 'NIT')
+      if (res && res.exitoso) {
+        setMensajeSync('El agente se está ejecutando y consultando las entidades...')
+        
+        let intentos = 0
+        const intervalPoll = setInterval(async () => {
+          intentos++
+          try {
+            const estadoRes = await apiBackend.obtenerEstadoExtraccion()
+            if (estadoRes && estadoRes.estado) {
+              if (estadoRes.estado === 'completado') {
+                clearInterval(intervalPoll)
+                setSincronizando(false)
+                setMensajeSync('El agente finalizó la extracción y los datos quedaron actualizados.')
+                cargarDatos()
+                setVersionTabla(v => v + 1)
+                setTimeout(() => setMensajeSync(''), 6000)
+              } else if (estadoRes.estado === 'error') {
+                clearInterval(intervalPoll)
+                setSincronizando(false)
+                setMensajeSync('El agente reportó una novedad durante la ejecución.')
+                setTimeout(() => setMensajeSync(''), 6000)
+              } else {
+                setMensajeSync(estadoRes.mensaje || 'El agente continúa extrayendo información...')
+              }
             }
+          } catch (err) {
+            console.error('Error consultando estado del agente:', err)
+          }
+
+          if (intentos > 40) {
+            clearInterval(intervalPoll)
+            setSincronizando(false)
+            setMensajeSync('El agente sigue procesando. Los datos se actualizarán automáticamente.')
             setTimeout(() => setMensajeSync(''), 6000)
           }
-        } catch (err) {
-          console.error('Error al monitorear el estado del agente:', err)
-        }
-      }, 4000)
-
+        }, 3000)
+      } else {
+        setSincronizando(false)
+        setMensajeSync(res?.mensaje || 'No fue posible iniciar el agente.')
+        setTimeout(() => setMensajeSync(''), 5000)
+      }
     } catch (e) {
-      setMensajeSync('No fue posible comunicarse con el servicio en este momento. Inténtalo de nuevo.')
+      console.error('Error al sincronizar:', e)
       setSincronizando(false)
+      setMensajeSync('No fue posible comunicarse con el servicio en este momento. Inténtalo de nuevo.')
       setTimeout(() => setMensajeSync(''), 5000)
     }
   }
@@ -197,21 +218,23 @@ export function PaginaInicio() {
             <div className="alerta-fila-rotativa-contenedor">
               {/* Controles de navegación manual compactos */}
               <div className="alerta-fila-controles">
-                <button 
-                  className="alerta-fila-btn-flecha"
-                  onClick={() => setIndiceRotativo((indiceRotativo - 1 + listaAlertas.length) % listaAlertas.length)}
-                  title="Alerta anterior"
-                >
-                  <ChevronLeft size={13} />
-                </button>
+                <EtiquetaTooltip texto="Alerta anterior">
+                  <button 
+                    className="alerta-fila-btn-flecha"
+                    onClick={() => setIndiceRotativo((indiceRotativo - 1 + listaAlertas.length) % listaAlertas.length)}
+                  >
+                    <ChevronLeft size={13} />
+                  </button>
+                </EtiquetaTooltip>
                 <span className="alerta-fila-conteo">{indiceRotativo + 1}/{listaAlertas.length}</span>
-                <button 
-                  className="alerta-fila-btn-flecha"
-                  onClick={() => setIndiceRotativo((indiceRotativo + 1) % listaAlertas.length)}
-                  title="Alerta siguiente"
-                >
-                  <ChevronRight size={13} />
-                </button>
+                <EtiquetaTooltip texto="Alerta siguiente">
+                  <button 
+                    className="alerta-fila-btn-flecha"
+                    onClick={() => setIndiceRotativo((indiceRotativo + 1) % listaAlertas.length)}
+                  >
+                    <ChevronRight size={13} />
+                  </button>
+                </EtiquetaTooltip>
               </div>
 
               {/* Tarjeta de alerta activa en 1 línea */}
@@ -219,7 +242,6 @@ export function PaginaInicio() {
                 className={`alerta-fila-caja-activa ${alertaActual.colorClase}`}
                 onClick={() => manejarVerificarAlerta(alertaActual.placa)}
                 style={{ cursor: 'pointer' }}
-                title={`Haga clic para filtrar y ver detalle de ${alertaActual.placa}`}
               >
                 <div className="alerta-fila-lado-izq">
                   <alertaActual.icono size={14} className="alerta-fila-icono" />
@@ -272,13 +294,14 @@ export function PaginaInicio() {
       </main>
 
       {/* Botón Flotante para Asistente IA */}
-      <button 
-        className="chat-flotante-boton"
-        onClick={() => setChatAbierto(!chatAbierto)}
-        title="Abrir Asistente IA"
-      >
-        <MessageSquare size={26} />
-      </button>
+      <EtiquetaTooltip texto="Abrir Asistente IA" posicion="izquierda">
+        <button 
+          className="chat-flotante-boton"
+          onClick={() => setChatAbierto(!chatAbierto)}
+        >
+          <MessageSquare size={26} />
+        </button>
+      </EtiquetaTooltip>
 
       {/* Ventana de Chat Flotante */}
       <ChatAgenteIA 

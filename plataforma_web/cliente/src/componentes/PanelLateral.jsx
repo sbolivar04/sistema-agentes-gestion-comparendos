@@ -5,15 +5,17 @@ import {
   BarChart3, 
   ChevronLeft, 
   ChevronRight, 
-  ShieldCheck
+  ShieldCheck,
+  Sliders
 } from 'lucide-react'
 
 export function PanelLateral({ 
   vistaActual = 'inicio', 
   alCambiarVista, 
-  colapsado = false, 
+  colapsado = true, 
   alAlternarColapso,
-  totalComparendos = 14
+  totalComparendos = 14,
+  alertasConfiguracion = 0
 }) {
   const { esOscuro } = useTema()
 
@@ -30,6 +32,14 @@ export function PanelLateral({
       titulo: 'Métricas & Dashboard',
       icono: BarChart3,
       activo: vistaActual === 'metricas'
+    },
+    {
+      id: 'configuracion',
+      titulo: 'Configuración de Consultas',
+      icono: Sliders,
+      conteo: alertasConfiguracion > 0 ? '!' : undefined,
+      esAlerta: alertasConfiguracion > 0,
+      activo: vistaActual === 'configuracion'
     }
   ]
 
@@ -90,7 +100,10 @@ export function PanelLateral({
               </div>
 
               {!colapsado && item.conteo !== undefined && (
-                <span className="panel-item-badge-conteo">
+                <span 
+                  className="panel-item-badge-conteo" 
+                  style={item.esAlerta ? { backgroundColor: '#f59e0b', color: '#fff', fontWeight: '800', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%' } : {}}
+                >
                   {item.conteo}
                 </span>
               )}
@@ -100,7 +113,12 @@ export function PanelLateral({
                 <div className="panel-tooltip-flotante">
                   <span>{item.titulo}</span>
                   {item.conteo !== undefined && (
-                    <span className="panel-tooltip-conteo">{item.conteo}</span>
+                    <span 
+                      className="panel-tooltip-conteo"
+                      style={item.esAlerta ? { backgroundColor: '#f59e0b', color: '#fff' } : {}}
+                    >
+                      {item.conteo}
+                    </span>
                   )}
                 </div>
               )}

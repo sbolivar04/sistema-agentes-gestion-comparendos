@@ -116,6 +116,22 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                 for c in sesion.scalars(stmt_pagados).all()
             ]
 
+            # 4. Alertas de Configuración de Entidades (Desambiguación NIT / Cédula)
+            from base_datos.repositorio import RepositorioBaseDatos
+            repo = RepositorioBaseDatos(sesion)
+            entidades_db = repo.obtener_entidades_consulta(solo_activas=False)
+            alertas_configuracion = [
+                {
+                    "id": e.id,
+                    "nombre_entidad": e.nombre_entidad,
+                    "criterio_busqueda": e.criterio_busqueda,
+                    "tipo_documento": e.tipo_documento,
+                    "mensaje": f"El agente identificó que {e.nombre_entidad} (Doc: {e.criterio_busqueda}) requiere definir si corresponde a NIT o Cédula para consultar sus comparendos en el SIMIT."
+                }
+                for e in entidades_db
+                if e.requiere_desambiguacion or e.tipo_documento in ["Pendiente", "Sin especificar"]
+            ]
+
             return {
                 "exitoso": True,
                 "total_alertas_vencimiento": len(alertas_vencimiento),
@@ -123,9 +139,11 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                 "total_amarillas": sum(1 for a in alertas_vencimiento if a["nivel_alerta"] == "AMARILLO"),
                 "total_nuevos_recientes": len(comparendos_nuevos),
                 "total_pagados_recientes": len(comparendos_pagados),
+                "total_alertas_configuracion": len(alertas_configuracion),
                 "alertas_vencimiento": alertas_vencimiento,
                 "comparendos_nuevos": comparendos_nuevos,
-                "comparendos_pagados": comparendos_pagados
+                "comparendos_pagados": comparendos_pagados,
+                "alertas_configuracion": alertas_configuracion
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener alertas: {str(e)}")

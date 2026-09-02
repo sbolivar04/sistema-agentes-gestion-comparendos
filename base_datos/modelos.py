@@ -68,10 +68,23 @@ class LogExtraccionORM(Base):
     exitoso: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     mensaje_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-class PreferenciaConsultaORM(Base):
-    """Modelo ORM para almacenar la preferencia de tipo de documento cuando SIMIT encuentra múltiples opciones para un NIT/Cédula."""
-    __tablename__ = "preferencias_consulta"
+class EntidadConsultaORM(Base):
+    """
+    Modelo ORM consolidado para gestionar las entidades/personas de la flota corporativa,
+    sus documentos (NIT o Cédula), y su estado de consulta y desambiguación.
+    """
+    __tablename__ = "entidades_consulta"
 
-    criterio_busqueda: Mapped[str] = mapped_column(String(50), primary_key=True)
-    tipo_documento: Mapped[str] = mapped_column(String(50), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nombre_entidad: Mapped[str] = mapped_column(String(150), nullable=False)
+    criterio_busqueda: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    tipo_documento: Mapped[str] = mapped_column(String(30), default="NIT", nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    requiere_desambiguacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     fecha_registro: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    fecha_actualizacion: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+# Alias de compatibilidad
+PreferenciaConsultaORM = EntidadConsultaORM

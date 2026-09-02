@@ -6,7 +6,8 @@ from pathlib import Path
 DIRECTORIO_BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(DIRECTORIO_BASE))
 
-from base_datos.conexion import inicializar_base_datos
+from base_datos.conexion import inicializar_base_datos, obtener_sesion_bd
+from base_datos.repositorio import RepositorioBaseDatos
 from agente_extraccion_simit.extractor_principal import ejecutar_extraccion
 
 logging.basicConfig(
@@ -16,39 +17,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ExtractorLote")
 
-def obtener_nits_corporativos() -> list[dict]:
-    """Extrae la lista de empresas y NITs desde datos/NIT.xlsx o lista por defecto."""
-    nits = []
-    archivo_excel = DIRECTORIO_BASE / "datos" / "NIT.xlsx"
-    
-    if archivo_excel.exists():
-        try:
-            import openpyxl
-            wb = openpyxl.load_workbook(str(archivo_excel), data_only=True)
-            ws = wb.active
-            for fila in ws.iter_rows(values_only=True):
-                # Detectar filas válidas con empresa y NIT
-                if fila and len(fila) >= 3:
-                    empresa = fila[1]
-                    nit_val = fila[2]
-                    if empresa and nit_val and str(nit_val).replace("-", "").isdigit():
-                        nit_limpio = str(nit_val).replace("-", "").strip()
-                        nits.append({"empresa": str(empresa).strip(), "nit": nit_limpio})
-        except Exception as e:
-            logger.warning(f"No se pudo leer datos/NIT.xlsx: {e}")
+def obtener_entidades_activas() -> list[dict]:
+    """Obtiene la lista de entidades y documentos activos desde la base de datos Supabase."""
+    entidades = []
+    try:
+        with obtener_sesion_bd() as sesion:
+            repo = RepositorioBaseDatos(sesion)
+            registros = repo.obtener_entidades_consulta(solo_activas=True)
+            for r in registros:
+                entidades.append({
+                    "id": r.id,
+                    "empresa": r.nombre_entidad,
+                    "criterio": r.criterio_busqueda,
+                    "tipo_documento": r.tipo_documento or "NIT"
+                })
+    except Exception as e:
+        logger.error(f"Error al consultar entidades activas en Supabase: {e}")
 
-    # Fallback con NITs de la empresa si no se pudo leer el archivo
-    if not nits:
-        nits = [
-            {"empresa": "FSCR Ingeniería S.A.S", "nit": "900160091"},
-            {"empresa": "Servicios y Apoyo Total S.A.S.", "nit": "901818414"},
-            {"empresa": "Maste Servicios Integrales S A S", "nit": "9005285051"}
+    # Fallback de seguridad si la base de datos estuviera vacía
+    if not entidades:
+        entidades = [
+            {"id": 1, "empresa": "FSCR Ingeniería S.A.S", "criterio": "900160091", "tipo_documento": "NIT"},
+            {"id": 2, "empresa": "Servicios y Apoyo Total S.A.S.", "criterio": "901818414", "tipo_documento": "NIT"},
+            {"id": 3, "empresa": "Maste Servicios Integrales S A S", "criterio": "9005285051", "tipo_documento": "NIT"}
         ]
 
-    return nits
+    return entidades
 
 def ejecutar_extraccion_lote(sin_interfaz: bool = True):
-    """Ejecuta la extracción secuencial para todas las empresas de la flota corporativa."""
+    """Ejecuta la extracción secuencial para todas las entidades activas de la flota corporativa."""
     logger.info("=" * 80)
     logger.info(" INICIANDO EXTRACCIÓN AUTOMÁTICA EN LOTE PARA FLOTA CORPORATIVA")
     logger.info("=" * 80)
@@ -56,9 +53,9 @@ def ejecutar_extraccion_lote(sin_interfaz: bool = True):
     # 1. Asegurar base de datos inicializada
     inicializar_base_datos()
 
-    # 2. Cargar NITs
-    empresas = obtener_nits_corporativos()
-    logger.info(f"Se encontraron {len(empresas)} entidades para procesar en lote.")
+    # 2. Cargar entidades desde Supabase
+    empresas = obtener_entidades_activas()
+    logger.info(f"Se encontraron {len(empresas)} entidades activas en Supabase para procesar.")
 
     totales = {
         "empresas_procesadas": 0,
@@ -70,11 +67,12 @@ def ejecutar_extraccion_lote(sin_interfaz: bool = True):
 
     for idx, item in enumerate(empresas, 1):
         empresa = item["empresa"]
-        nit = item["nit"]
-        logger.info(f"\n[{idx}/{len(empresas)}] Procesando {empresa} (NIT: {nit})...")
+        criterio = item.get("criterio") or item.get("nit")
+        tipo_doc = item.get("tipo_documento") or "NIT"
+        logger.info(f"\n[{idx}/{len(empresas)}] Procesando {empresa} ({tipo_doc}: {criterio})...")
 
         try:
-            resultado = ejecutar_extraccion(criterio=nit, tipo_consulta="NIT", sin_interfaz=sin_interfaz)
+            resultado = ejecutar_extraccion(criterio=criterio, tipo_consulta=tipo_doc, sin_interfaz=sin_interfaz)
             if resultado and resultado.exitoso:
                 totales["empresas_procesadas"] += 1
                 totales["total_comparendos"] += resultado.total_comparendos
@@ -83,7 +81,7 @@ def ejecutar_extraccion_lote(sin_interfaz: bool = True):
             else:
                 totales["errores"] += 1
         except Exception as e:
-            logger.error(f"Error procesando NIT {nit} ({empresa}): {e}")
+            logger.error(f"Error procesando {tipo_doc} {criterio} ({empresa}): {e}")
             totales["errores"] += 1
 
     # 3. Resumen final consolidado

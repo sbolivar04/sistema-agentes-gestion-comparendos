@@ -28,6 +28,7 @@ export function ProveedorAutenticacion({ children }) {
         }
         setUsuario(infoUsuario)
         localStorage.setItem('usuario_fscr_sesion', JSON.stringify(infoUsuario))
+        localStorage.setItem('vista_actual_fscr', 'inicio')
         return { exitoso: true }
       }
 
@@ -40,6 +41,7 @@ export function ProveedorAutenticacion({ children }) {
         }
         setUsuario(infoUsuario)
         localStorage.setItem('usuario_fscr_sesion', JSON.stringify(infoUsuario))
+        localStorage.setItem('vista_actual_fscr', 'inicio')
         return { exitoso: true }
       }
 
@@ -59,6 +61,7 @@ export function ProveedorAutenticacion({ children }) {
     }
     setUsuario(null)
     localStorage.removeItem('usuario_fscr_sesion')
+    localStorage.removeItem('vista_actual_fscr')
   }
 
   return (

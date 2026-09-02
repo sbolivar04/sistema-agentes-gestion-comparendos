@@ -175,7 +175,20 @@ class ClienteNavegadorSimit:
                                 texto_modal = await m.inner_text()
                                 if "varios resultados" in texto_modal or "Selecciona el que desees" in texto_modal or "documento" in texto_modal.lower():
                                     logger.info("SIMIT solicita aclarar el tipo de documento (Múltiples resultados).")
-                                    await self._handle_disambiguation_modal(page, criterio_clean, m)
+                                    resuelto = await self._handle_disambiguation_modal(page, criterio_clean, m)
+                                    if not resuelto:
+                                        # Terminar esta consulta amigablemente para que el lote continúe con la siguiente
+                                        await browser.close()
+                                        return ResultadoConsultaSchema(
+                                            criterio_busqueda=criterio_clean,
+                                            tipo_consulta=TipoConsulta.NIT if tipo_consulta == "NIT" else TipoConsulta.PLACA,
+                                            exitoso=True,
+                                            total_comparendos=0,
+                                            total_valor_total=0.0,
+                                            total_valor_con_descuento_vigente=0.0,
+                                            comparendos=[],
+                                            mensaje_error="Requiere configurar si es NIT o Cédula en la plataforma web"
+                                        )
                                     api_consulta_json = None # Resetear payload interceptado para esperar la nueva respuesta
                                     modal_detectado = True
                                     await page.wait_for_timeout(2000)
@@ -492,8 +505,12 @@ class ClienteNavegadorSimit:
         """Wrapper síncrono para ejecutar la extracción con Playwright."""
         return asyncio.run(self.consultar_en_vivo_async(criterio, tipo_consulta))
 
-    async def _handle_disambiguation_modal(self, page, criterio: str, modal=None):
-        """Maneja el modal de SIMIT cuando encuentra múltiples documentos (ej. NIT y Cédula) para el mismo número."""
+    async def _handle_disambiguation_modal(self, page, criterio: str, modal=None) -> bool:
+        """
+        Maneja el modal de SIMIT cuando encuentra múltiples documentos (ej. NIT y Cédula).
+        Consulta la tabla entidades_consulta en Supabase.
+        Retorna True si se pudo resolver con la configuración existente, o False si requiere configuración del usuario.
+        """
         try:
             if not modal:
                 modal = await page.query_selector(".modal-content:has(#modalMultiplesPersonas)")
@@ -508,7 +525,7 @@ class ClienteNavegadorSimit:
                 
             if not opciones:
                 logger.warning("Modal detectado pero no se hallaron opciones (radio buttons).")
-                return
+                return False
                 
             from base_datos.conexion import obtener_sesion_bd
             from base_datos.repositorio import RepositorioBaseDatos
@@ -523,26 +540,20 @@ class ClienteNavegadorSimit:
                     for r, label in opciones:
                         if pref.lower() in label.lower():
                             opcion_elegida = r
-                            logger.info(f"Usando preferencia guardada '{pref}' para el documento {criterio}.")
+                            logger.info(f"Usando tipo de documento configurado '{pref}' para {criterio}.")
                             break
                             
                 if not opcion_elegida:
-                    # En modo no interactivo / headless / flota corporativa: seleccionar automáticamente la opción de NIT
-                    for r, label in opciones:
-                        if "nit" in label.lower():
-                            opcion_elegida = r
-                            logger.info(f"Seleccionando automáticamente opción '{label}' (NIT) para {criterio}.")
-                            repo.guardar_preferencia_documento(criterio, "Nit")
-                            break
-                            
-                    # Fallback si ninguna contiene explícitamente la palabra 'nit'
-                    if not opcion_elegida and len(opciones) > 0:
-                        opcion_elegida, label_elegido = opciones[0]
-                        logger.info(f"Seleccionando por defecto primera opción '{label_elegido}' para {criterio}.")
-                        repo.guardar_preferencia_documento(criterio, "Nit")
+                    # El documento no tiene tipo configurado o está pendiente: no inventar ni asumir
+                    repo.marcar_desambiguacion_requerida(criterio)
+                    logger.warning(
+                        f"El agente identificó que el documento {criterio} requiere definir si corresponde a NIT o Cédula. "
+                        f"Se generó la notificación en la plataforma web para su configuración."
+                    )
+                    return False
                     
             if opcion_elegida:
-                # Seleccionar la opción elegida
+                # Seleccionar la opción configurada
                 await opcion_elegida.evaluate("(el) => el.click()")
                 await page.wait_for_timeout(600)
                 
@@ -550,15 +561,17 @@ class ClienteNavegadorSimit:
                 btn_continuar = await modal.query_selector("button:has-text('Continuar'), .btn-primary, button.btn-continuar")
                 if btn_continuar:
                     await btn_continuar.evaluate("(el) => el.click()")
-                    logger.info("Se hizo clic en el botón Continuar del modal de desambiguación.")
+                    logger.info("Opción de documento seleccionada exitosamente en SIMIT.")
                 else:
                     await page.keyboard.press("Enter")
-                    logger.info("No se encontró el botón Continuar, se presionó Enter.")
+                    logger.info("Se presionó Enter para confirmar la opción.")
                     
-                logger.info("Opción de documento confirmada. Esperando carga de resultados...")
+                logger.info("Esperando carga de comparendos tras confirmar tipo de documento...")
                 await page.wait_for_timeout(2500)
+                return True
         except Exception as e:
             logger.warning(f"Error al manejar modal de desambiguación: {e}")
+            return False
 
 
 # Alias de compatibilidad

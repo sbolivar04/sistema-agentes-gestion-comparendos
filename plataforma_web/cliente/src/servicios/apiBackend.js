@@ -58,5 +58,64 @@ export const apiBackend = {
   async obtenerEstadoExtraccion() {
     const res = await fetch(`${API_BASE}/extraccion/estado`)
     return await res.json()
+  },
+
+  // ==========================================
+  // GESTIÓN DE ENTIDADES Y CONFIGURACIÓN
+  // ==========================================
+  async obtenerEntidades() {
+    const res = await fetch(`${API_BASE}/entidades`)
+    return await res.json()
+  },
+
+  async crearEntidad(datos) {
+    const res = await fetch(`${API_BASE}/entidades`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(datos)
+    })
+    return await res.json()
+  },
+
+  async actualizarEntidad(id, datos) {
+    const res = await fetch(`${API_BASE}/entidades/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(datos)
+    })
+    return await res.json()
+  },
+
+  async eliminarEntidad(id) {
+    const res = await fetch(`${API_BASE}/entidades/${id}`, {
+      method: 'DELETE'
+    })
+    return await res.json()
+  },
+
+  async resolverTipoEntidad(id, tipo_documento) {
+    const res = await fetch(`${API_BASE}/entidades/${id}/resolver-tipo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo_documento })
+    })
+    return await res.json()
+  },
+
+  // ==========================================
+  // PROGRAMACIÓN DEL AGENTE (CRON.JOB)
+  // ==========================================
+  async obtenerProgramacion() {
+    const res = await fetch(`${API_BASE}/programacion`)
+    return await res.json()
+  },
+
+  async actualizarProgramacion(datos) {
+    const res = await fetch(`${API_BASE}/programacion`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(datos)
+    })
+    return await res.json()
   }
 }
