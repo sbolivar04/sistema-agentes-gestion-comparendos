@@ -272,11 +272,14 @@ export function TablaComparendos({
 
       // 3. Coincidencia por Descuentos
       if (filtroDescuento === '50') {
-        if (!c.aplica_descuento_50) return false
+        const tiene50 = Boolean(c.aplica_descuento_50 || c.etiqueta_descuento?.includes('50'))
+        if (!tiene50) return false
       } else if (filtroDescuento === '25') {
-        if (!c.aplica_descuento_25) return false
+        const tiene25 = Boolean(c.aplica_descuento_25 || c.etiqueta_descuento?.includes('25'))
+        if (!tiene25) return false
       } else if (filtroDescuento === 'sin_descuento') {
-        if (c.aplica_descuento_50 || c.aplica_descuento_25) return false
+        const tieneAlguno = Boolean(c.aplica_descuento_50 || c.aplica_descuento_25 || c.etiqueta_descuento?.includes('50') || c.etiqueta_descuento?.includes('25'))
+        if (tieneAlguno) return false
       }
 
       // 4. Coincidencia por Subestado Operativo (semáforo / localStorage)
