@@ -197,24 +197,31 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
 
             # Agrupar logs de hoy:
             # 1. Determinista por 'id_lote' (agrupa exactamente todas las entidades de una misma corrida masiva)
-            # 2. Respaldo por proximidad temporal amplia (<= 600s) para logs históricos que no tengan id_lote
+            # 2. Respaldo por proximidad temporal para lotes masivos legados que no tengan id_lote
+            # 3. Consultas individuales (MANUAL_INDIVIDUAL): cada una se procesa como consulta individual aislada
             grupos_map = {}
-            logs_sin_lote = []
+            logs_masivos_sin_lote = []
+            grupos_logs = []
 
             for l in logs_hoy:
                 id_lote = getattr(l, "id_lote", None)
+                origen_l = getattr(l, "origen", None)
                 if id_lote:
                     if id_lote not in grupos_map:
                         grupos_map[id_lote] = []
                     grupos_map[id_lote].append(l)
+                elif origen_l in ["PROGRAMADO_MASIVO", "MANUAL_MASIVO"]:
+                    logs_masivos_sin_lote.append(l)
                 else:
-                    logs_sin_lote.append(l)
+                    # Consulta individual atómica (sin lote)
+                    grupos_logs.append([l])
 
-            grupos_logs = list(grupos_map.values())
+            for g_lote in grupos_map.values():
+                grupos_logs.append(g_lote)
 
-            if logs_sin_lote:
+            if logs_masivos_sin_lote:
                 grupo_actual = []
-                for l in logs_sin_lote:
+                for l in logs_masivos_sin_lote:
                     if not grupo_actual:
                         grupo_actual.append(l)
                     else:
@@ -318,6 +325,10 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                 else:
                     # --- CONSULTA INDIVIDUAL (1 solo vehículo o empresa / NIT) ---
                     item = g[0]
+                    # Si este fallo individual ya fue superado por un reintento exitoso posterior hoy, no mostrar error
+                    if not item.exitoso and ultimo_log_por_criterio.get(item.criterio_busqueda, item).exitoso:
+                        continue
+
                     # Si este criterio pertenece a una entidad consolidada en lotes masivos de hoy
                     # y fue un reintento manual que ya actualizó el lote a exitoso, no duplicar tarjeta
                     criterios_en_lotes = set()
