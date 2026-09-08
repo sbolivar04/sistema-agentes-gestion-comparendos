@@ -99,7 +99,7 @@ class ClienteNavegadorSimit:
                 
                 page.on("response", handle_response)
 
-                # 1. Cargar portal oficial de SIMIT completamente (esperar domcontentloaded)
+                # 1. Cargar portal oficial de SIMIT completamente
                 logger.info("Cargando portal SIMIT...")
                 max_intentos_carga = 3
                 for intento_carga in range(1, max_intentos_carga + 1):
@@ -115,21 +115,10 @@ class ClienteNavegadorSimit:
                             logger.error(f"Fallo definitivo al cargar SIMIT tras {max_intentos_carga} intentos.")
                             raise e
 
-                # Pausa breve para asegurar renderizado visual de la portada
-                await page.wait_for_timeout(2500)
+                # 2. Cerrar anuncios, modales informativos iniciales y popups de forma ultra-robusta
+                await self._cerrar_anuncios_iniciales(page)
 
-                # 2. Cerrar modales iniciales si interrumpe la pantalla
-                try:
-                    close_buttons = await page.query_selector_all("button.modal-info-close, #modalInformation button.close, .modal.show button.close, button.close")
-                    for btn in close_buttons:
-                        if await btn.is_visible():
-                            await btn.click()
-                            logger.info("Modal informativo inicial cerrado.")
-                    await page.keyboard.press("Escape")
-                except Exception:
-                    pass
-
-                # 3. Flujo de consulta con verificación de carga y reintentos (Reload si se congela SIMIT)
+                # 3. Flujo de consulta con verificación de carga y reintentos
                 input_selector = "input#txtBusqueda, input[name='txtBusqueda'], input[placeholder*='documento'], input[placeholder*='Placa']"
                 max_intentos = 3
                 busqueda_exitosa = False
@@ -140,27 +129,43 @@ class ClienteNavegadorSimit:
                     try:
                         await page.wait_for_selector(input_selector, state="visible", timeout=20000)
                     except Exception:
-                        logger.warning(f"[Intento {intento}] El input de búsqueda no estuvo disponible. Recargando página...")
+                        logger.warning(f"[Intento {intento}] El input de búsqueda no estuvo disponible. Limpiando modales y recargando página...")
+                        await self._cerrar_anuncios_iniciales(page)
                         await page.reload(wait_until="domcontentloaded", timeout=30000)
-                        await page.wait_for_timeout(3000)
+                        await self._cerrar_anuncios_iniciales(page)
                         continue
 
+                    # Asegurar input limpio y enfocado
+                    await page.click(input_selector, force=True)
                     await page.fill(input_selector, "")
                     await page.fill(input_selector, criterio_clean)
-                    await page.wait_for_timeout(800)
+                    # Disparar eventos de entrada para Angular / Frameworks reactivos
+                    await page.dispatch_event(input_selector, "input")
+                    await page.dispatch_event(input_selector, "change")
+                    await page.wait_for_timeout(600)
                     
                     api_consulta_json = None # Resetear la variable interceptada antes de consultar
 
-                    btn_consultar = await page.query_selector("button#btnConsultar, button[type='submit'], .btn-consultar, button:has-text('Consultar')")
+                    # En SIMIT el botón oficial de búsqueda tiene id="consultar"
+                    btn_consultar = await page.query_selector("button#consultar, button[type='submit'], button#btnConsultar, .btn-consultar, button:has-text('Consultar')")
                     if btn_consultar and await btn_consultar.is_visible():
                         await btn_consultar.click(force=True)
-                        logger.info(f"[Intento {intento}] Clic en botón 'Consultar' realizado.")
+                        logger.info(f"[Intento {intento}] Clic en botón de búsqueda 'Consultar' realizado.")
                     else:
                         await page.press(input_selector, "Enter")
                         logger.info(f"[Intento {intento}] Consulta enviada mediante tecla Enter.")
 
+                    # Esperar a que el validador de seguridad interno de SIMIT (whcModal) finalice
+                    logger.info(f"[Intento {intento}] Consulta enviada. Esperando validación de seguridad de SIMIT...")
+                    for _ in range(16): # hasta 8 segundos de espera activa
+                        whc = await page.query_selector("#whcModal")
+                        if whc and await whc.is_visible():
+                            await page.wait_for_timeout(500)
+                        else:
+                            break
+
                     # INICIO DEL CRONÓMETRO DE ESPERA TRAS DAR CLIC EN BUSCAR
-                    logger.info(f"[Intento {intento}] Consulta enviada. Esperando a que SIMIT renderice la respuesta...")
+                    logger.info(f"[Intento {intento}] Esperando a que SIMIT renderice la respuesta...")
                     
                     render_ok = False
                     es_vacio = False
@@ -168,31 +173,29 @@ class ClienteNavegadorSimit:
                         await page.wait_for_timeout(1000)
                         
                         # ¿Apareció el modal de múltiples resultados (Nit/Cédula)?
-                        modals = await page.query_selector_all(".modal-content, .modal-dialog, dialog, #modalMultiplesPersonas")
+                        modals_multiples = await page.query_selector_all("#modal-multiples-personas, #modalMultiplesPersonas, .modal.show:has(input[type='radio'])")
                         modal_detectado = False
-                        for m in modals:
+                        for m in modals_multiples:
                             if await m.is_visible():
-                                texto_modal = await m.inner_text()
-                                if "varios resultados" in texto_modal or "Selecciona el que desees" in texto_modal or "documento" in texto_modal.lower():
-                                    logger.info("SIMIT solicita aclarar el tipo de documento (Múltiples resultados).")
-                                    resuelto = await self._handle_disambiguation_modal(page, criterio_clean, m)
-                                    if not resuelto:
-                                        # Terminar esta consulta amigablemente para que el lote continúe con la siguiente
-                                        await browser.close()
-                                        return ResultadoConsultaSchema(
-                                            criterio_busqueda=criterio_clean,
-                                            tipo_consulta=TipoConsulta.NIT if tipo_consulta == "NIT" else TipoConsulta.PLACA,
-                                            exitoso=True,
-                                            total_comparendos=0,
-                                            total_valor_total=0.0,
-                                            total_valor_con_descuento_vigente=0.0,
-                                            comparendos=[],
-                                            mensaje_error="Requiere configurar si es NIT o Cédula en la plataforma web"
-                                        )
-                                    api_consulta_json = None # Resetear payload interceptado para esperar la nueva respuesta
-                                    modal_detectado = True
-                                    await page.wait_for_timeout(2000)
-                                    break
+                                logger.info("SIMIT solicita aclarar el tipo de documento (Múltiples resultados detectados).")
+                                resuelto = await self._handle_disambiguation_modal(page, criterio_clean, m)
+                                if not resuelto:
+                                    # Terminar esta consulta amigablemente para que el lote continúe con la siguiente
+                                    await browser.close()
+                                    return ResultadoConsultaSchema(
+                                        criterio_busqueda=criterio_clean,
+                                        tipo_consulta=TipoConsulta.NIT if tipo_consulta == "NIT" else TipoConsulta.PLACA,
+                                        exitoso=True,
+                                        total_comparendos=0,
+                                        total_valor_total=0.0,
+                                        total_valor_con_descuento_vigente=0.0,
+                                        comparendos=[],
+                                        mensaje_error="Requiere configurar si es NIT o Cédula en la plataforma web"
+                                    )
+                                api_consulta_json = None # Resetear payload interceptado para esperar la nueva respuesta
+                                modal_detectado = True
+                                await page.wait_for_timeout(2000)
+                                break
                                     
                         if modal_detectado:
                             continue
@@ -202,7 +205,7 @@ class ClienteNavegadorSimit:
                         if len(rows_found) > 0:
                             render_ok = True
                             busqueda_exitosa = True
-                            logger.info(f"[Intento {intento}] ¡Tabla de comparendos renderizada a los {seg} segundos ({len(rows_found)} filas encontradas)!")
+                            logger.info(f"[Intento {intento}] ¡Tabla de comparendos renderizada a los {seg} segundos ({len(rows_found)} registros encontrados)!")
                             break
 
                         # ¿SIMIT desplegó un mensaje oficial dentro del contenedor de resultados?
@@ -216,12 +219,13 @@ class ClienteNavegadorSimit:
                                 logger.info(f"[Intento {intento}] SIMIT confirma oficialmente por texto a los {seg}s: No existen comparendos registrados para {criterio_clean}.")
                                 break
                                 
-                        # Verificación con API interna solo tras al menos 6 segundos de espera
+                        # Verificación con API interna solo si NO requiere desambiguación de personas
                         if seg >= 6 and api_consulta_json is not None:
+                            personas = api_consulta_json.get("personasMismoDocumento", [])
                             multas = api_consulta_json.get("multas", [])
                             comps = api_consulta_json.get("comparendos", [])
                             resols = api_consulta_json.get("resoluciones", [])
-                            if len(multas) == 0 and len(comps) == 0 and len(resols) == 0:
+                            if len(personas) == 0 and len(multas) == 0 and len(comps) == 0 and len(resols) == 0:
                                 render_ok = True
                                 busqueda_exitosa = True
                                 es_vacio = True
@@ -234,7 +238,7 @@ class ClienteNavegadorSimit:
                         logger.warning(f"[Intento {intento}] Tiempo de espera agotado sin respuesta clara de SIMIT. Recargando página y reintentando...")
                         try:
                             await page.goto(self.simit_url, wait_until="domcontentloaded", timeout=25000)
-                            await page.wait_for_timeout(3000)
+                            await self._cerrar_anuncios_iniciales(page)
                         except Exception as err_reload:
                             logger.warning(f"[Intento {intento}] Error al recargar página de SIMIT: {err_reload}")
 
@@ -505,46 +509,105 @@ class ClienteNavegadorSimit:
         """Wrapper síncrono para ejecutar la extracción con Playwright."""
         return asyncio.run(self.consultar_en_vivo_async(criterio, tipo_consulta))
 
+    async def _cerrar_anuncios_iniciales(self, page):
+        """
+        Cierra anuncios emergentes, campañas y modales informativos iniciales de SIMIT (ej: #modalInformation).
+        Garantiza que el fondo (backdrop) no bloquee la interacción con el buscador.
+        """
+        logger.info("Verificando y cerrando anuncios o modales informativos iniciales de SIMIT...")
+        # Esperar hasta 5 segundos activamente por si el modal informativo de SIMIT tarda en renderizar
+        for _ in range(10):
+            try:
+                # 1. Intentar hacer clic en el botón de cerrar del modal informativo
+                close_btn = await page.query_selector("#modalInformation .modal-info-close, #modalInformation button.close, button.modal-info-close, .modal.show button.close, button.close")
+                if close_btn and await close_btn.is_visible():
+                    await close_btn.click(force=True)
+                    logger.info("Anuncio/modal informativo inicial de SIMIT cerrado mediante clic.")
+                    await page.wait_for_timeout(600)
+                    break
+            except Exception:
+                pass
+            await page.wait_for_timeout(500)
+
+        # 2. Cerrar con teclado Escape
+        try:
+            await page.keyboard.press("Escape")
+        except Exception:
+            pass
+
+        # 3. Limpieza de seguridad vía DOM para garantizar que ningún backdrop oscuro bloquee la pantalla
+        try:
+            await page.evaluate('''() => {
+                // Eliminar modal informativo si persiste en pantalla
+                const modalInfo = document.getElementById("modalInformation");
+                if (modalInfo) {
+                    modalInfo.classList.remove("show");
+                    modalInfo.style.display = "none";
+                }
+                // Eliminar cualquier backdrop residual de Bootstrap
+                const backdrops = document.querySelectorAll(".modal-backdrop");
+                backdrops.forEach(b => b.remove());
+                document.body.classList.remove("modal-open");
+                document.body.style.overflow = "auto";
+                
+                // Ocultar burbuja flotante de Civii si interfiere
+                const civii = document.querySelector(".civii-bubble, .civii-bubble-container");
+                if (civii) civii.style.display = "none";
+            }''')
+        except Exception:
+            pass
+
     async def _handle_disambiguation_modal(self, page, criterio: str, modal=None) -> bool:
         """
-        Maneja el modal de SIMIT cuando encuentra múltiples documentos (ej. NIT y Cédula).
-        Consulta la tabla entidades_consulta en Supabase.
-        Retorna True si se pudo resolver con la configuración existente, o False si requiere configuración del usuario.
+        Maneja el modal de SIMIT cuando encuentra múltiples personas/documentos (ej. NIT y Cédula).
+        Consulta la tabla entidades_consulta en Supabase para seleccionar la opción configurada.
         """
         try:
             if not modal:
-                modal = await page.query_selector(".modal-content:has(#modalMultiplesPersonas)")
+                modal = await page.query_selector("#modal-multiples-personas, .modal.show:has(#modalMultiplesPersonas)")
                 if not modal:
                     modal = page
                 
-            radios = await modal.query_selector_all("input[type='radio']")
+            radios = await modal.query_selector_all("input[type='radio'], .custom-control-input")
             opciones = []
             for r in radios:
-                label_text = await r.evaluate("(el) => el.parentElement.innerText || el.nextElementSibling.innerText || ''")
-                opciones.append((r, label_text.strip()))
+                r_id = await r.get_attribute("id")
+                # En Bootstrap custom-control, el texto descriptivo está dentro del label asociado
+                lbl = await modal.query_selector(f"label[for='{r_id}']") if r_id else None
+                if lbl:
+                    label_text = (await lbl.inner_text()).strip()
+                else:
+                    label_text = await r.evaluate("(el) => el.parentElement.innerText || el.closest('div').innerText || ''")
+                opciones.append((r, lbl, label_text))
                 
             if not opciones:
-                logger.warning("Modal detectado pero no se hallaron opciones (radio buttons).")
+                logger.warning("Modal de desambiguación detectado pero no se hallaron opciones de radio.")
                 return False
                 
             from base_datos.conexion import obtener_sesion_bd
             from base_datos.repositorio import RepositorioBaseDatos
             
             opcion_elegida = None
+            lbl_elegido = None
             
             with obtener_sesion_bd() as session:
                 repo = RepositorioBaseDatos(session)
                 pref = repo.obtener_preferencia_documento(criterio)
                 
+                # Si no hay preferencia explícita en BD pero el criterio es numérico de empresa (>6 dígitos), asumir NIT
+                if not pref and len(criterio) >= 8 and criterio.isdigit():
+                    pref = "NIT"
+                
                 if pref:
-                    for r, label in opciones:
+                    for r, lbl, label in opciones:
                         if pref.lower() in label.lower():
                             opcion_elegida = r
+                            lbl_elegido = lbl
                             logger.info(f"Usando tipo de documento configurado '{pref}' para {criterio}.")
                             break
                             
                 if not opcion_elegida:
-                    # El documento no tiene tipo configurado o está pendiente: no inventar ni asumir
+                    # El documento no tiene tipo configurado o está pendiente: registrar advertencia
                     repo.marcar_desambiguacion_requerida(criterio)
                     logger.warning(
                         f"El agente identificó que el documento {criterio} requiere definir si corresponde a NIT o Cédula. "
@@ -553,14 +616,19 @@ class ClienteNavegadorSimit:
                     return False
                     
             if opcion_elegida:
-                # Seleccionar la opción configurada
-                await opcion_elegida.evaluate("(el) => el.click()")
+                # Seleccionar la opción configurada haciendo clic en su label (Bootstrap custom radio)
+                if lbl_elegido:
+                    await lbl_elegido.click(force=True)
+                else:
+                    await opcion_elegida.click(force=True)
+                
+                await opcion_elegida.evaluate("(el) => { el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); }")
                 await page.wait_for_timeout(600)
                 
                 # Hacer clic en Continuar
                 btn_continuar = await modal.query_selector("button:has-text('Continuar'), .btn-primary, button.btn-continuar")
                 if btn_continuar:
-                    await btn_continuar.evaluate("(el) => el.click()")
+                    await btn_continuar.click(force=True)
                     logger.info("Opción de documento seleccionada exitosamente en SIMIT.")
                 else:
                     await page.keyboard.press("Enter")
@@ -576,3 +644,4 @@ class ClienteNavegadorSimit:
 
 # Alias de compatibilidad
 SimitBrowserClient = ClienteNavegadorSimit
+

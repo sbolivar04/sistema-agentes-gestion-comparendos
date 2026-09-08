@@ -138,43 +138,54 @@ def ejecutar_extraccion(
     return resultado
 
 def main():
-    if len(sys.argv) > 1:
-        param_limpio = re.sub(r'[^A-Z0-9]', '', sys.argv[1].upper())
+    sin_interfaz = "--sin-interfaz" in sys.argv or "--headless" in sys.argv
+    args_limpios = [a for a in sys.argv[1:] if a not in ["--sin-interfaz", "--headless"]]
+
+    if len(args_limpios) > 0:
+        param_limpio = re.sub(r'[^A-Z0-9]', '', args_limpios[0].upper())
         if param_limpio.isdigit():
-            ejecutar_extraccion(param_limpio, "NIT")
+            ejecutar_extraccion(param_limpio, "NIT", sin_interfaz=sin_interfaz)
         else:
-            ejecutar_extraccion(param_limpio, "PLACA")
+            ejecutar_extraccion(param_limpio, "PLACA", sin_interfaz=sin_interfaz)
         return
 
     print("\n" + "=" * 80)
     print("      AGENTE DE EXTRACCIÓN Y VALIDACIÓN DE COMPARENDOS SIMIT (IA FLOTAS)     ")
     print("=" * 80)
     print("Seleccione la opción o digite directamente el NIT / Placa a consultar:")
-    print(" 1. Consulta Masiva por NIT Corporativo")
-    print(" 2. Consulta Puntual por Placa Vehicular")
-    print(" 3. Salir")
+    print(" 1. Consulta Masiva por NIT Corporativo (Visual)")
+    print(" 2. Consulta Puntual por Placa Vehicular (Visual)")
+    print(" 3. Consulta en Segundo Plano / Headless (Sin ventana gráfica)")
+    print(" 4. Salir")
     print("-" * 80)
-    opcion = input("Digite 1, 2 o ingrese directamente la Placa / NIT: ").strip().upper()
+    opcion = input("Digite 1, 2, 3 o ingrese directamente la Placa / NIT: ").strip().upper()
 
-    if not opcion or opcion == "3":
+    if not opcion or opcion == "4":
         print("Operación finalizada.")
         return
 
     if opcion == "1":
         nit = input("\nIngrese el NIT corporativo a consultar: ").strip()
         if nit:
-            ejecutar_extraccion(nit, "NIT")
+            ejecutar_extraccion(nit, "NIT", sin_interfaz=False)
     elif opcion == "2":
         placa = input("\nIngrese la placa del vehículo a consultar: ").strip().upper()
         if placa:
-            ejecutar_extraccion(placa, "PLACA")
+            ejecutar_extraccion(placa, "PLACA", sin_interfaz=False)
+    elif opcion == "3":
+        criterio = input("\nIngrese el NIT o Placa a consultar en segundo plano: ").strip()
+        if criterio:
+            param_limpio = re.sub(r'[^A-Z0-9]', '', criterio.upper())
+            tipo = "NIT" if param_limpio.isdigit() else "PLACA"
+            ejecutar_extraccion(param_limpio, tipo, sin_interfaz=True)
     else:
         if opcion.isdigit():
             print(f"\n[DETECCIÓN AUTOMÁTICA]: Procesando consulta para el NIT {opcion}...")
-            ejecutar_extraccion(opcion, "NIT")
+            ejecutar_extraccion(opcion, "NIT", sin_interfaz=False)
         else:
             print(f"\n[DETECCIÓN AUTOMÁTICA]: Procesando consulta para la Placa {opcion}...")
-            ejecutar_extraccion(opcion, "PLACA")
+            ejecutar_extraccion(opcion, "PLACA", sin_interfaz=False)
 
 if __name__ == "__main__":
     main()
+
