@@ -230,11 +230,18 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
             # Ordenar grupos por la fecha más reciente de sus logs (descendente)
             grupos_logs.sort(key=lambda g: max(item.fecha_ejecucion for item in g), reverse=True)
 
+            flota_masiva_incluida = False
+
             for g in grupos_logs[:10]:
                 origen_grupo = getattr(g[0], "origen", None)
                 es_corrida_masiva = len(g) >= 2 or origen_grupo in ["PROGRAMADO_MASIVO", "MANUAL_MASIVO"]
                 
                 if es_corrida_masiva and len(g) >= 2:
+                    # Consolidar en una única tarjeta la sincronización masiva más reciente de la flota
+                    if flota_masiva_incluida:
+                        continue
+                    flota_masiva_incluida = True
+
                     # --- CONSULTA MASIVA (2 o más NITs o vehículos en una misma consulta) ---
                     total_entidades = len(g)
                     items_fallidos_orig = [item for item in g if not item.exitoso]
@@ -247,7 +254,8 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                     
                     fallidos = len(items_fallidos_pendientes)
                     total_exitosos = total_entidades - fallidos
-                    fecha_reciente = max(ultimo_log_por_criterio.get(item.criterio_busqueda, item).fecha_ejecucion for item in g)
+                    # Usar la fecha REAL de ejecución del lote
+                    fecha_reciente = max(item.fecha_ejecucion for item in g)
                     fecha_formateada = formatear_fecha_colombia(fecha_reciente)
                     id_identificador = getattr(g[0], "id_lote", None) or f"lote-{g[0].id}"
 
