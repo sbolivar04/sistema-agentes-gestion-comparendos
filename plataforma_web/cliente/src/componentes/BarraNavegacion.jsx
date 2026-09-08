@@ -38,6 +38,16 @@ export function BarraNavegacion({
     }
   })
 
+  // Orden persistente y estable de las notificaciones
+  const [ordenClaves, setOrdenClaves] = useState(() => {
+    try {
+      const guardado = localStorage.getItem('fscr_notificaciones_orden')
+      return guardado ? JSON.parse(guardado) : []
+    } catch (e) {
+      return []
+    }
+  })
+
   const marcarComoLeida = (clave) => {
     if (!clave) return
     setLeidas((prev) => {
@@ -253,8 +263,10 @@ export function BarraNavegacion({
 
   const reiniciarNotificacionesNoLeidas = () => {
     setLeidas([])
+    setOrdenClaves([])
     try {
       localStorage.removeItem('fscr_notificaciones_leidas')
+      localStorage.removeItem('fscr_notificaciones_orden')
     } catch (e) {}
   }
 
@@ -381,29 +393,112 @@ export function BarraNavegacion({
     ...itemsConfig
   ]
 
+  // Sincronización y mantenimiento del orden persistente:
+  // 1. Las no leídas se colocan de primero y se organizan por tipo de notificación.
+  // 2. Las leídas se preservan en su posición y NUNCA se reorganizan.
+  // 3. Al marcar como leída, la notificación permanece fija en su posición sin moverse jamás.
+  useEffect(() => {
+    if (todasLasClaves.length === 0) return
+
+    setOrdenClaves((prevOrden) => {
+      const clavesValidas = (prevOrden || []).filter((c) => todasLasClaves.includes(c))
+      const nuevasClaves = todasLasClaves.filter((c) => !clavesValidas.includes(c))
+
+      // Inicialización o si no hay orden previo
+      if (clavesValidas.length === 0) {
+        const noLeidasOrdenadas = todasLasNotificaciones
+          .filter((n) => !leidas.includes(n.clave))
+          .sort((a, b) => {
+            if (a.ordenCategoria !== b.ordenCategoria) {
+              return a.ordenCategoria - b.ordenCategoria
+            }
+            if (a.tipo === 'vencimiento' && b.tipo === 'vencimiento') {
+              return (a.prioridadInterna || 3) - (b.prioridadInterna || 3)
+            }
+            return 0
+          })
+          .map((n) => n.clave)
+
+        const leidasOrdenadas = todasLasNotificaciones
+          .filter((n) => leidas.includes(n.clave))
+          .sort((a, b) => a.ordenCategoria - b.ordenCategoria)
+          .map((n) => n.clave)
+
+        const nuevoOrden = [...noLeidasOrdenadas, ...leidasOrdenadas]
+        try {
+          localStorage.setItem('fscr_notificaciones_orden', JSON.stringify(nuevoOrden))
+        } catch (e) {}
+        return nuevoOrden
+      }
+
+      // Si llegaron nuevas alertas desde backend:
+      if (nuevasClaves.length > 0) {
+        const nuevasNoLeidas = todasLasNotificaciones
+          .filter((n) => nuevasClaves.includes(n.clave) && !leidas.includes(n.clave))
+          .sort((a, b) => {
+            if (a.ordenCategoria !== b.ordenCategoria) {
+              return a.ordenCategoria - b.ordenCategoria
+            }
+            if (a.tipo === 'vencimiento' && b.tipo === 'vencimiento') {
+              return (a.prioridadInterna || 3) - (b.prioridadInterna || 3)
+            }
+            return 0
+          })
+          .map((n) => n.clave)
+
+        const nuevasLeidas = nuevasClaves.filter((c) => !nuevasNoLeidas.includes(c))
+        const nuevoOrden = [...nuevasNoLeidas, ...clavesValidas, ...nuevasLeidas]
+        try {
+          localStorage.setItem('fscr_notificaciones_orden', JSON.stringify(nuevoOrden))
+        } catch (e) {}
+        return nuevoOrden
+      }
+
+      // Si se eliminó alguna clave
+      if (clavesValidas.length !== (prevOrden || []).length) {
+        try {
+          localStorage.setItem('fscr_notificaciones_orden', JSON.stringify(clavesValidas))
+        } catch (e) {}
+        return clavesValidas
+      }
+
+      return prevOrden
+    })
+  }, [todasLasClaves.join(','), escenarioPrueba])
+
+  // Mapeo indexado por clave
+  const mapaPorClave = new Map(todasLasNotificaciones.map(n => [n.clave, n]))
+
+  // Determinar claves en orden respetando ordenClaves
+  const clavesAUsar = (ordenClaves && ordenClaves.length > 0)
+    ? [
+        ...ordenClaves.filter(c => mapaPorClave.has(c)),
+        ...todasLasClaves.filter(c => !ordenClaves.includes(c))
+      ]
+    : [
+        // Orden inicial determinista: no leídas arriba por categoría, luego leídas
+        ...todasLasNotificaciones
+          .filter(n => !leidas.includes(n.clave))
+          .sort((a, b) => {
+            if (a.ordenCategoria !== b.ordenCategoria) return a.ordenCategoria - b.ordenCategoria
+            if (a.tipo === 'vencimiento' && b.tipo === 'vencimiento') return (a.prioridadInterna || 3) - (b.prioridadInterna || 3)
+            return 0
+          })
+          .map(n => n.clave),
+        ...todasLasNotificaciones
+          .filter(n => leidas.includes(n.clave))
+          .sort((a, b) => a.ordenCategoria - b.ordenCategoria)
+          .map(n => n.clave)
+      ]
+
+  const listaOrdenada = clavesAUsar.map(c => mapaPorClave.get(c)).filter(Boolean)
+
   // Filtrado por pestaña activa ('todas' o 'urgentes')
-  const notificacionesFiltradas = todasLasNotificaciones.filter(item => {
+  const notificacionesFiltradas = listaOrdenada.filter(item => {
     if (pestanaActivaA === 'urgentes') {
       return item.esUrgente
     }
     return true
-  })
-
-  // ORDEN FIJO Y DETERMINISTA:
-  // La posición de cada notificación es 100% ESTABLE.
-  // Leer o no leer una notificación NO altera su posición jamás.
-  notificacionesFiltradas.sort((a, b) => {
-    // 1. Orden fijo por categoría de relevancia (Sync -> Nuevos -> Pagados -> Vencimiento -> Config)
-    if (a.ordenCategoria !== b.ordenCategoria) {
-      return a.ordenCategoria - b.ordenCategoria
-    }
-
-    // 2. Dentro de vencimientos, las que tienen menor tiempo restante primero
-    if (a.tipo === 'vencimiento' && b.tipo === 'vencimiento') {
-      return (a.prioridadInterna || 3) - (b.prioridadInterna || 3)
-    }
-
-    return 0
   })
 
   return (
