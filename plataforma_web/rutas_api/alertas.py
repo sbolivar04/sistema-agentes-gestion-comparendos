@@ -329,17 +329,6 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                     if not item.exitoso and ultimo_log_por_criterio.get(item.criterio_busqueda, item).exitoso:
                         continue
 
-                    # Si este criterio pertenece a una entidad consolidada en lotes masivos de hoy
-                    # y fue un reintento manual que ya actualizó el lote a exitoso, no duplicar tarjeta
-                    criterios_en_lotes = set()
-                    for grupo_m in grupos_logs:
-                        if len(grupo_m) >= 2 or getattr(grupo_m[0], "origen", None) in ["PROGRAMADO_MASIVO", "MANUAL_MASIVO"]:
-                            for elem in grupo_m:
-                                criterios_en_lotes.add(elem.criterio_busqueda)
-
-                    if item.criterio_busqueda in criterios_en_lotes and getattr(item, "origen", None) == "MANUAL_INDIVIDUAL" and item.exitoso:
-                        continue
-
                     nombre_entidad = entidades_dict.get(item.criterio_busqueda)
                     tipo_doc = item.tipo_consulta.value if hasattr(item.tipo_consulta, "value") else (item.tipo_consulta or "NIT")
 
