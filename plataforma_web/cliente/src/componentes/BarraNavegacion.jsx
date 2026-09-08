@@ -38,6 +38,9 @@ export function BarraNavegacion({
     }
   })
 
+  // Orden estático de notificaciones mientras el panel está abierto para evitar saltos al hacer clic
+  const [ordenClavesCongelado, setOrdenClavesCongelado] = useState(null)
+
   const marcarComoLeida = (clave) => {
     if (!clave) return
     setLeidas((prev) => {
@@ -253,6 +256,7 @@ export function BarraNavegacion({
 
   const reiniciarNotificacionesNoLeidas = () => {
     setLeidas([])
+    setOrdenClavesCongelado(null)
     try {
       localStorage.removeItem('fscr_notificaciones_leidas')
     } catch (e) {}
@@ -378,6 +382,23 @@ export function BarraNavegacion({
     ...itemsPagados
   ]
 
+  // Congelar el orden de presentación al momento de abrir el panel
+  // para que al marcar una notificación como leída permanezca fija en su posición sin saltar
+  useEffect(() => {
+    if (mostrarNotificaciones) {
+      const orden = [...todasLasNotificaciones].sort((a, b) => {
+        if (!a.esLeida && b.esLeida) return -1
+        if (a.esLeida && !b.esLeida) return 1
+        if (a.esUrgente && !b.esUrgente) return -1
+        if (!a.esUrgente && b.esUrgente) return 1
+        return a.ordenCategoria - b.ordenCategoria
+      }).map(item => item.clave)
+      setOrdenClavesCongelado(orden)
+    } else {
+      setOrdenClavesCongelado(null)
+    }
+  }, [mostrarNotificaciones, escenarioPrueba])
+
   // Filtrado por pestaña activa ('todas' o 'urgentes')
   const notificacionesFiltradas = todasLasNotificaciones.filter(item => {
     if (pestanaActivaA === 'urgentes') {
@@ -386,17 +407,27 @@ export function BarraNavegacion({
     return true
   })
 
-  // REGLA CRÍTICA: LAS NOTIFICACIONES NO LEÍDAS SIEMPRE APARECEN PRIMERO QUE LAS LEÍDAS
-  notificacionesFiltradas.sort((a, b) => {
-    // 1. No leídas primero (false antes que true)
-    if (!a.esLeida && b.esLeida) return -1
-    if (a.esLeida && !b.esLeida) return 1
-    // 2. Si ambas comparten el mismo estado de lectura, priorizar urgentes
-    if (a.esUrgente && !b.esUrgente) return -1
-    if (!a.esUrgente && b.esUrgente) return 1
-    // 3. Mantener orden por categoría
-    return a.ordenCategoria - b.ordenCategoria
-  })
+  // REGLA CRÍTICA:
+  // 1. Las notificaciones no leídas aparecen arriba cuando se abre el panel.
+  // 2. Si el usuario marca una como leída mientras el panel está abierto, NO salta ni se reordena: permanece fija en su posición.
+  if (ordenClavesCongelado && ordenClavesCongelado.length > 0) {
+    notificacionesFiltradas.sort((a, b) => {
+      const idxA = ordenClavesCongelado.indexOf(a.clave)
+      const idxB = ordenClavesCongelado.indexOf(b.clave)
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB
+      if (idxA !== -1) return -1
+      if (idxB !== -1) return 1
+      return a.ordenCategoria - b.ordenCategoria
+    })
+  } else {
+    notificacionesFiltradas.sort((a, b) => {
+      if (!a.esLeida && b.esLeida) return -1
+      if (a.esLeida && !b.esLeida) return 1
+      if (a.esUrgente && !b.esUrgente) return -1
+      if (!a.esUrgente && b.esUrgente) return 1
+      return a.ordenCategoria - b.ordenCategoria
+    })
+  }
 
   return (
     <>
