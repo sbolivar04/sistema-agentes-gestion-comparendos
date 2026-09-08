@@ -316,8 +316,87 @@ export function BarraNavegacion({
     setMostrarNotificaciones(false)
   }
 
-  // Filtrado de items para Opción A
-  const itemsVencimientoA = pestanaActivaA === 'urgentes' ? listaUrgentes : alertasVencimiento
+  // Construcción unificada y estructurada de todas las notificaciones para ordenamiento global
+  const itemsSync = alertasSync.map(s => ({
+    id: `sync-${s.id}`,
+    clave: `sync-${s.id}`,
+    tipo: 'sync',
+    esLeida: leidas.includes(`sync-${s.id}`),
+    esUrgente: Boolean(s.es_error),
+    ordenCategoria: 1,
+    datos: s
+  }))
+
+  const itemsNuevos = comparendosNuevos.slice(0, 10).map(n => ({
+    id: `nuevo-${n.id}`,
+    clave: `nuevo-${n.id}`,
+    tipo: 'nuevo',
+    esLeida: leidas.includes(`nuevo-${n.id}`),
+    esUrgente: false,
+    ordenCategoria: 2,
+    datos: n
+  }))
+
+  const itemsVenc = alertasVencimiento.map(v => {
+    const esUrgente = v.nivel_alerta === 'ROJO' || (v.dias_habiles_restantes !== undefined && v.dias_habiles_restantes <= 4)
+    return {
+      id: `venc-${v.id}`,
+      clave: `venc-${v.id}`,
+      tipo: 'vencimiento',
+      esLeida: leidas.includes(`venc-${v.id}`),
+      esUrgente,
+      ordenCategoria: 3,
+      datos: v
+    }
+  })
+
+  const itemsConfig = alertasConfig.map(c => ({
+    id: `config-${c.id}`,
+    clave: `config-${c.id}`,
+    tipo: 'config',
+    esLeida: leidas.includes(`config-${c.id}`),
+    esUrgente: false,
+    ordenCategoria: 4,
+    datos: c
+  }))
+
+  const itemsPagados = comparendosPagados.map(p => ({
+    id: `pagado-${p.id}`,
+    clave: `pagado-${p.id}`,
+    tipo: 'pagado',
+    esLeida: leidas.includes(`pagado-${p.id}`),
+    esUrgente: false,
+    ordenCategoria: 5,
+    datos: p
+  }))
+
+  const todasLasNotificaciones = [
+    ...itemsSync,
+    ...itemsNuevos,
+    ...itemsVenc,
+    ...itemsConfig,
+    ...itemsPagados
+  ]
+
+  // Filtrado por pestaña activa ('todas' o 'urgentes')
+  const notificacionesFiltradas = todasLasNotificaciones.filter(item => {
+    if (pestanaActivaA === 'urgentes') {
+      return item.esUrgente
+    }
+    return true
+  })
+
+  // REGLA CRÍTICA: LAS NOTIFICACIONES NO LEÍDAS SIEMPRE APARECEN PRIMERO QUE LAS LEÍDAS
+  notificacionesFiltradas.sort((a, b) => {
+    // 1. No leídas primero (false antes que true)
+    if (!a.esLeida && b.esLeida) return -1
+    if (a.esLeida && !b.esLeida) return 1
+    // 2. Si ambas comparten el mismo estado de lectura, priorizar urgentes
+    if (a.esUrgente && !b.esUrgente) return -1
+    if (!a.esUrgente && b.esUrgente) return 1
+    // 3. Mantener orden por categoría
+    return a.ordenCategoria - b.ordenCategoria
+  })
 
   return (
     <>
@@ -431,315 +510,320 @@ export function BarraNavegacion({
                   </div>
                 ) : (
                   <div className="lista-notificaciones-compacta">
-                    {/* Notificaciones de Sincronización SIMIT (Error o Éxito) */}
-                    {alertasSync
-                      .filter(s => pestanaActivaA === 'todas' || s.es_error)
-                      .map((sync) => {
-                        const clave = `sync-${sync.id}`
-                        const esLeida = leidas.includes(clave)
-                        const esError = sync.es_error
+                    {notificacionesFiltradas.length === 0 ? (
+                      <div className="estado-vacio-notificaciones-compacto">
+                        <CheckCircle2 size={24} className="icono-vacio-verde" />
+                        <p className="texto-vacio-sub">
+                          {pestanaActivaA === 'urgentes' ? 'Sin alertas urgentes en la flota.' : 'Sin alertas en la flota vehicular.'}
+                        </p>
+                      </div>
+                    ) : (
+                      notificacionesFiltradas.map((item) => {
+                        const { clave, esLeida, tipo, datos } = item
 
-                        return (
-                          <div 
-                            key={clave} 
-                            className={`tarjeta-notif-compacta ${esLeida ? 'leida' : 'no-leida'} ${esError ? 'borde-sync-error' : 'borde-sync-ok'}`}
-                            onClick={() => marcarComoLeida(clave)}
-                          >
-                            <div className="notif-c-fila-1">
-                              <div className="notif-c-izq">
-                                {!esLeida && (
-                                  <EtiquetaTooltip texto="Alerta nueva sin leer">
-                                    <span className="punto-no-leida" />
-                                  </EtiquetaTooltip>
-                                )}
+                        // 1. Notificación de Sincronización SIMIT
+                        if (tipo === 'sync') {
+                          const sync = datos
+                          const esError = sync.es_error
+
+                          return (
+                            <div 
+                              key={clave} 
+                              className={`tarjeta-notif-compacta ${esLeida ? 'leida' : 'no-leida'} ${esError ? 'borde-sync-error' : 'borde-sync-ok'}`}
+                              onClick={() => marcarComoLeida(clave)}
+                            >
+                              <div className="notif-c-fila-1">
+                                <div className="notif-c-izq">
+                                  {!esLeida && (
+                                    <EtiquetaTooltip texto="Alerta nueva sin leer">
+                                      <span className="punto-no-leida" />
+                                    </EtiquetaTooltip>
+                                  )}
+                                  {esError ? (
+                                    <EtiquetaTooltip texto="Falló la consulta en el SIMIT">
+                                      <span className="tag-estado-compacto sync-error">
+                                        <AlertTriangle size={10} /> Fallo SIMIT
+                                      </span>
+                                    </EtiquetaTooltip>
+                                  ) : (
+                                    <EtiquetaTooltip texto="Consulta completada con éxito">
+                                      <span className="tag-estado-compacto sync-ok">
+                                        <CheckCircle2 size={10} /> Sincronizado
+                                      </span>
+                                    </EtiquetaTooltip>
+                                  )}
+                                  <span className="entidad-nombre-c">
+                                    {sync.empresa}
+                                  </span>
+                                </div>
+                                <span className="doc-entidad-c">
+                                  {sync.tipo_consulta === 'PLACA'
+                                    ? (sync.criterio?.toString().startsWith('Placa') ? sync.criterio : `Placa ${sync.criterio}`)
+                                    : (sync.criterio?.toString().startsWith('NIT') || sync.criterio?.toString().includes('entidades') || sync.criterio?.toString().includes('/')
+                                        ? sync.criterio
+                                        : `NIT ${sync.criterio}`)}
+                                </span>
+                              </div>
+
+                              <div className="notif-c-fila-2">
+                                <EtiquetaTooltip texto={sync.mensaje} className="tooltip-detalle-notif" posicion="arriba" soloSiTruncado soloEnPuntos>
+                                  <span className="notif-c-detalle">
+                                    {sync.mensaje}
+                                  </span>
+                                </EtiquetaTooltip>
                                 {esError ? (
-                                  <EtiquetaTooltip texto="Falló la consulta en el SIMIT">
-                                    <span className="tag-estado-compacto sync-error">
-                                      <AlertTriangle size={10} /> Fallo SIMIT
+                                  <EtiquetaTooltip texto="Volver a intentar la consulta en el SIMIT">
+                                    <span 
+                                      className="enlace-ver-c reintentar"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        marcarComoLeida(clave)
+                                        setMostrarNotificaciones(false)
+                                        if (alSincronizar) {
+                                          const criterioLimpio = (sync.criterio || '').toString().replace(/^(NIT|Placa)\s*/i, '').trim()
+                                          alSincronizar(criterioLimpio, sync.tipo_consulta || 'NIT', sync.empresa)
+                                        }
+                                      }}
+                                    >
+                                      Reintentar <RefreshCw size={10} />
                                     </span>
                                   </EtiquetaTooltip>
                                 ) : (
-                                  <EtiquetaTooltip texto="Consulta completada con éxito">
-                                    <span className="tag-estado-compacto sync-ok">
-                                      <CheckCircle2 size={10} /> Sincronizado
-                                    </span>
-                                  </EtiquetaTooltip>
+                                  <span className="fecha-sync-c">
+                                    {sync.fecha}
+                                  </span>
                                 )}
-                                <span className="entidad-nombre-c">
-                                  {sync.empresa}
+                              </div>
+                            </div>
+                          )
+                        }
+
+                        // 2. Comparendos Nuevos SIMIT
+                        if (tipo === 'nuevo') {
+                          const nuevo = datos
+                          return (
+                            <div 
+                              key={clave} 
+                              className={`tarjeta-notif-compacta ${esLeida ? 'leida' : 'no-leida'} borde-nuevo`}
+                              onClick={() => marcarComoLeida(clave)}
+                            >
+                              <div className="notif-c-fila-1">
+                                <div className="notif-c-izq">
+                                  {!esLeida && (
+                                    <EtiquetaTooltip texto="Nuevo comparendo no leído">
+                                      <span className="punto-no-leida" />
+                                    </EtiquetaTooltip>
+                                  )}
+                                  <span className="tag-estado-compacto nuevo">
+                                    <Sparkles size={10} /> Nuevo SIMIT
+                                  </span>
+                                  <span className="placa-texto-c">{nuevo.placa}</span>
+                                  {nuevo.tipo_descuento && (
+                                    <span className="chip-desc-c">Desc. {nuevo.tipo_descuento}</span>
+                                  )}
+                                </div>
+                                <span className="monto-nuevo-c">
+                                  ${Math.round(Number(nuevo.valor_total || 0)).toLocaleString('es-CO')}
                                 </span>
                               </div>
-                              <span className="doc-entidad-c">
-                                {sync.tipo_consulta === 'PLACA'
-                                  ? (sync.criterio?.toString().startsWith('Placa') ? sync.criterio : `Placa ${sync.criterio}`)
-                                  : (sync.criterio?.toString().startsWith('NIT') || sync.criterio?.toString().includes('entidades') || sync.criterio?.toString().includes('/')
-                                      ? sync.criterio
-                                      : `NIT ${sync.criterio}`)}
-                              </span>
-                            </div>
-
-                            <div className="notif-c-fila-2">
-                              <EtiquetaTooltip texto={sync.mensaje} className="tooltip-detalle-notif" posicion="arriba" soloSiTruncado soloEnPuntos>
-                                <span className="notif-c-detalle">
-                                  {sync.mensaje}
-                                </span>
-                              </EtiquetaTooltip>
-                              {esError ? (
-                                <EtiquetaTooltip texto="Volver a intentar la consulta en el SIMIT">
-                                  <span 
-                                    className="enlace-ver-c reintentar"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      marcarComoLeida(clave)
-                                      setMostrarNotificaciones(false)
-                                      if (alSincronizar) {
-                                        const criterioLimpio = (sync.criterio || '').toString().replace(/^(NIT|Placa)\s*/i, '').trim()
-                                        alSincronizar(criterioLimpio, sync.tipo_consulta || 'NIT', sync.empresa)
-                                      }
-                                    }}
-                                  >
-                                    Reintentar <RefreshCw size={10} />
+                              <div className="notif-c-fila-2">
+                                <EtiquetaTooltip 
+                                  texto={`${nuevo.secretaria} • Infracción ${nuevo.codigo_infraccion}${nuevo.fecha_limite_descuento ? ` • Vence desc. ${nuevo.fecha_limite_descuento}` : (nuevo.tipo_descuento ? ` • Desc. ${nuevo.tipo_descuento} (Sin notificar)` : '')}`}
+                                  className="tooltip-detalle-notif"
+                                  posicion="arriba"
+                                  soloSiTruncado
+                                  soloEnPuntos
+                                >
+                                  <span className="notif-c-detalle">
+                                    {nuevo.secretaria} • Infracción {nuevo.codigo_infraccion}
+                                    {nuevo.fecha_limite_descuento ? ` • Vence desc. ${nuevo.fecha_limite_descuento}` : (nuevo.tipo_descuento ? ` • Desc. ${nuevo.tipo_descuento} (Sin notificar)` : '')}
                                   </span>
                                 </EtiquetaTooltip>
-                              ) : (
-                                <span className="fecha-sync-c">
-                                  {sync.fecha}
+                                <span 
+                                  className="enlace-ver-c"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    manejarAbrirDetalle(nuevo, clave)
+                                  }}
+                                >
+                                  {esLeida ? 'Revisar' : 'Inspeccionar'} <ChevronRight size={11} />
                                 </span>
-                              )}
+                              </div>
                             </div>
-                          </div>
-                        )
-                    })}
+                          )
+                        }
 
-                    {/* Comparendos Nuevos SIMIT (Solo activos recién ingresados) */}
-                    {pestanaActivaA === 'todas' && comparendosNuevos.slice(0, 10).map((nuevo) => {
-                      const clave = `nuevo-${nuevo.id}`
-                      const esLeida = leidas.includes(clave)
-                      return (
-                        <div 
-                          key={clave} 
-                          className={`tarjeta-notif-compacta ${esLeida ? 'leida' : 'no-leida'} borde-nuevo`}
-                          onClick={() => marcarComoLeida(clave)}
-                        >
-                          <div className="notif-c-fila-1">
-                            <div className="notif-c-izq">
-                              {!esLeida && (
-                                <EtiquetaTooltip texto="Nuevo comparendo no leído">
-                                  <span className="punto-no-leida" />
-                                </EtiquetaTooltip>
-                              )}
-                              <span className="tag-estado-compacto nuevo">
-                                <Sparkles size={10} /> Nuevo SIMIT
-                              </span>
-                              <span className="placa-texto-c">{nuevo.placa}</span>
-                              {nuevo.tipo_descuento && (
-                                <span className="chip-desc-c">Desc. {nuevo.tipo_descuento}</span>
-                              )}
-                            </div>
-                            <span className="monto-nuevo-c">
-                              ${Math.round(Number(nuevo.valor_total || 0)).toLocaleString('es-CO')}
-                            </span>
-                          </div>
-                          <div className="notif-c-fila-2">
-                            <EtiquetaTooltip 
-                              texto={`${nuevo.secretaria} • Infracción ${nuevo.codigo_infraccion}${nuevo.fecha_limite_descuento ? ` • Vence desc. ${nuevo.fecha_limite_descuento}` : (nuevo.tipo_descuento ? ` • Desc. ${nuevo.tipo_descuento} (Sin notificar)` : '')}`}
-                              className="tooltip-detalle-notif"
-                              posicion="arriba"
-                              soloSiTruncado
-                              soloEnPuntos
+                        // 3. Alertas de Vencimiento de Descuentos
+                        if (tipo === 'vencimiento') {
+                          const alerta = datos
+                          const esUrgente = item.esUrgente
+                          const esPrecaucion = alerta.nivel_alerta === 'AMARILLO' || (alerta.dias_habiles_restantes > 4 && alerta.dias_habiles_restantes <= 8)
+
+                          return (
+                            <div 
+                              key={clave} 
+                              className={`tarjeta-notif-compacta ${esLeida ? 'leida' : 'no-leida'} ${esUrgente ? 'borde-urgente' : (esPrecaucion ? 'borde-precaucion' : 'borde-vigente')}`}
+                              onClick={() => marcarComoLeida(clave)}
                             >
-                              <span className="notif-c-detalle">
-                                {nuevo.secretaria} • Infracción {nuevo.codigo_infraccion}
-                                {nuevo.fecha_limite_descuento ? ` • Vence desc. ${nuevo.fecha_limite_descuento}` : (nuevo.tipo_descuento ? ` • Desc. ${nuevo.tipo_descuento} (Sin notificar)` : '')}
-                              </span>
-                            </EtiquetaTooltip>
-                            <span 
-                              className="enlace-ver-c"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                manejarAbrirDetalle(nuevo, clave)
+                              <div className="notif-c-fila-1">
+                                <div className="notif-c-izq">
+                                  {!esLeida && (
+                                    <EtiquetaTooltip texto="Alerta nueva sin leer">
+                                      <span className="punto-no-leida" />
+                                    </EtiquetaTooltip>
+                                  )}
+                                  {esUrgente ? (
+                                    <span className="tag-estado-compacto urgente">
+                                      <AlertTriangle size={10} /> Urgente • {alerta.dias_habiles_restantes}d
+                                    </span>
+                                  ) : esPrecaucion ? (
+                                    <span className="tag-estado-compacto precaucion">
+                                      <Clock size={10} /> Precaución • {alerta.dias_habiles_restantes}d
+                                    </span>
+                                  ) : (
+                                    <span className="tag-estado-compacto vigente">
+                                      <CheckCircle2 size={10} /> Vigente • {alerta.dias_habiles_restantes}d
+                                    </span>
+                                  )}
+                                  <span className="placa-texto-c">{alerta.placa}</span>
+                                  <span className="chip-desc-c">Desc. {alerta.tipo_descuento}</span>
+                                </div>
+
+                                <span className="monto-ahorro-c">
+                                  Ahorro: ${Math.round(Number(alerta.ahorro_en_juego || 0)).toLocaleString('es-CO')}
+                                </span>
+                              </div>
+
+                              <div className="notif-c-fila-2">
+                                <EtiquetaTooltip 
+                                  texto={`${alerta.secretaria || 'SIMIT'} • Vence el ${alerta.fecha_limite}`}
+                                  className="tooltip-detalle-notif"
+                                  posicion="arriba"
+                                  soloSiTruncado
+                                  soloEnPuntos
+                                >
+                                  <span className="notif-c-detalle">
+                                    {alerta.secretaria || 'SIMIT'} • Vence el ${alerta.fecha_limite}
+                                  </span>
+                                </EtiquetaTooltip>
+                                <span 
+                                  className="enlace-ver-c"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    manejarAbrirDetalle(alerta, clave)
+                                  }}
+                                >
+                                  {esLeida ? 'Revisar' : 'Inspeccionar'} <ChevronRight size={11} />
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        }
+
+                        // 4. Alertas de Configuración
+                        if (tipo === 'config') {
+                          const configItem = datos
+                          return (
+                            <div 
+                              key={clave} 
+                              className={`tarjeta-notif-compacta ${esLeida ? 'leida' : 'no-leida'} borde-config`}
+                              onClick={() => {
+                                marcarComoLeida(clave)
+                                setMostrarNotificaciones(false)
+                                if (alNavegarAConfiguracion) {
+                                  alNavegarAConfiguracion()
+                                }
                               }}
                             >
-                              {esLeida ? 'Revisar' : 'Inspeccionar'} <ChevronRight size={11} />
-                            </span>
-                          </div>
-                        </div>
-                      )
-                    })}
-
-                    {/* Alertas de Vencimiento de Descuentos */}
-                    {itemsVencimientoA.map((alerta) => {
-                      const clave = `venc-${alerta.id}`
-                      const esLeida = leidas.includes(clave)
-                      const esUrgente = alerta.nivel_alerta === 'ROJO' || (alerta.dias_habiles_restantes !== undefined && alerta.dias_habiles_restantes <= 4)
-                      const esPrecaucion = alerta.nivel_alerta === 'AMARILLO' || (alerta.dias_habiles_restantes > 4 && alerta.dias_habiles_restantes <= 8)
-
-                      return (
-                        <div 
-                          key={clave} 
-                          className={`tarjeta-notif-compacta ${esLeida ? 'leida' : 'no-leida'} ${esUrgente ? 'borde-urgente' : (esPrecaucion ? 'borde-precaucion' : 'borde-vigente')}`}
-                          onClick={() => marcarComoLeida(clave)}
-                        >
-                          {/* Fila 1: Estado + Placa + Descuento + Monto Ahorro */}
-                          <div className="notif-c-fila-1">
-                            <div className="notif-c-izq">
-                              {!esLeida && (
-                                <EtiquetaTooltip texto="Alerta nueva sin leer">
-                                  <span className="punto-no-leida" />
+                              <div className="notif-c-fila-1">
+                                <div className="notif-c-izq">
+                                  {!esLeida && (
+                                    <EtiquetaTooltip texto="Alerta nueva sin leer">
+                                      <span className="punto-no-leida" />
+                                    </EtiquetaTooltip>
+                                  )}
+                                  <span className="tag-estado-compacto config">
+                                    <Settings size={10} /> Configurar
+                                  </span>
+                                  <span className="entidad-nombre-c">{configItem.nombre_entidad}</span>
+                                </div>
+                                <span className="doc-entidad-c">{configItem.criterio_busqueda}</span>
+                              </div>
+                              <div className="notif-c-fila-2">
+                                <EtiquetaTooltip 
+                                  texto="Requiere definir si es NIT o Cédula para SIMIT"
+                                  className="tooltip-detalle-notif"
+                                  posicion="arriba"
+                                  soloSiTruncado
+                                  soloEnPuntos
+                                >
+                                  <span className="notif-c-detalle">
+                                    Requiere definir si es NIT o Cédula para SIMIT
+                                  </span>
                                 </EtiquetaTooltip>
-                              )}
-                              {esUrgente ? (
-                                <span className="tag-estado-compacto urgente">
-                                  <AlertTriangle size={10} /> Urgente • {alerta.dias_habiles_restantes}d
+                                <span className="enlace-ver-c">
+                                  Configurar <ChevronRight size={11} />
                                 </span>
-                              ) : esPrecaucion ? (
-                                <span className="tag-estado-compacto precaucion">
-                                  <Clock size={10} /> Precaución • {alerta.dias_habiles_restantes}d
-                                </span>
-                              ) : (
-                                <span className="tag-estado-compacto vigente">
-                                  <CheckCircle2 size={10} /> Vigente • {alerta.dias_habiles_restantes}d
-                                </span>
-                              )}
-                              <span className="placa-texto-c">{alerta.placa}</span>
-                              <span className="chip-desc-c">Desc. {alerta.tipo_descuento}</span>
+                              </div>
                             </div>
+                          )
+                        }
 
-                            <span className="monto-ahorro-c">
-                              Ahorro: ${Math.round(Number(alerta.ahorro_en_juego || 0)).toLocaleString('es-CO')}
-                            </span>
-                          </div>
-
-                          {/* Fila 2: Secretaría • Fecha límite • Acción de inspección */}
-                          <div className="notif-c-fila-2">
-                            <EtiquetaTooltip 
-                              texto={`${alerta.secretaria || 'SIMIT'} • Vence el ${alerta.fecha_limite}`}
-                              className="tooltip-detalle-notif"
-                              posicion="arriba"
-                              soloSiTruncado
-                              soloEnPuntos
+                        // 5. Comparendos Pagados / Retirados
+                        if (tipo === 'pagado') {
+                          const pagado = datos
+                          return (
+                            <div 
+                              key={clave} 
+                              className={`tarjeta-notif-compacta ${esLeida ? 'leida' : 'no-leida'} borde-pagado-pizarra`}
+                              onClick={() => marcarComoLeida(clave)}
                             >
-                              <span className="notif-c-detalle">
-                                {alerta.secretaria || 'SIMIT'} • Vence el {alerta.fecha_limite}
-                              </span>
-                            </EtiquetaTooltip>
-                            <span 
-                              className="enlace-ver-c"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                manejarAbrirDetalle(alerta, clave)
-                              }}
-                            >
-                              {esLeida ? 'Revisar' : 'Inspeccionar'} <ChevronRight size={11} />
-                            </span>
-                          </div>
-                        </div>
-                      )
-                    })}
-
-                    {/* Alertas de Configuración de Entidades */}
-                    {pestanaActivaA === 'todas' && alertasConfig.map((item) => {
-                      const clave = `config-${item.id}`
-                      const esLeida = leidas.includes(clave)
-                      return (
-                        <div 
-                          key={clave} 
-                          className={`tarjeta-notif-compacta ${esLeida ? 'leida' : 'no-leida'} borde-config`}
-                          onClick={() => {
-                            marcarComoLeida(clave)
-                            setMostrarNotificaciones(false)
-                            if (alNavegarAConfiguracion) {
-                              alNavegarAConfiguracion()
-                            }
-                          }}
-                        >
-                          <div className="notif-c-fila-1">
-                            <div className="notif-c-izq">
-                              {!esLeida && (
-                                <EtiquetaTooltip texto="Alerta nueva sin leer">
-                                  <span className="punto-no-leida" />
+                              <div className="notif-c-fila-1">
+                                <div className="notif-c-izq">
+                                  {!esLeida && (
+                                    <EtiquetaTooltip texto="Alerta nueva sin leer">
+                                      <span className="punto-no-leida" />
+                                    </EtiquetaTooltip>
+                                  )}
+                                  <span className="tag-estado-compacto pagado-pizarra">
+                                    <FileCheck size={10} /> Retirado SIMIT
+                                  </span>
+                                  <span className="placa-texto-c">{pagado.placa}</span>
+                                  <span className="chip-desc-c pagado-pizarra">Paz y Salvo</span>
+                                </div>
+                                <span className="monto-pagado-pizarra">
+                                  Saldado: ${Math.round(Number(pagado.valor_total || 0)).toLocaleString('es-CO')}
+                                </span>
+                              </div>
+                              <div className="notif-c-fila-2">
+                                <EtiquetaTooltip 
+                                  texto={`Comparendo ${pagado.numero_comparendo || ''} en ${pagado.secretaria || 'SIMIT'} • Pago confirmado y retirado de SIMIT`}
+                                  className="tooltip-detalle-notif"
+                                  posicion="arriba"
+                                  soloSiTruncado
+                                  soloEnPuntos
+                                >
+                                  <span className="notif-c-detalle">
+                                    {pagado.secretaria || 'SIMIT'} • Pago confirmado en SIMIT
+                                  </span>
                                 </EtiquetaTooltip>
-                              )}
-                              <span className="tag-estado-compacto config">
-                                <Settings size={10} /> Configurar
-                              </span>
-                              <span className="entidad-nombre-c">{item.nombre_entidad}</span>
+                                <span 
+                                  className="enlace-ver-c"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    manejarAbrirDetalle(pagado, clave)
+                                  }}
+                                >
+                                  {esLeida ? 'Revisar' : 'Inspeccionar'} <ChevronRight size={11} />
+                                </span>
+                              </div>
                             </div>
-                            <span className="doc-entidad-c">{item.criterio_busqueda}</span>
-                          </div>
-                          <div className="notif-c-fila-2">
-                            <EtiquetaTooltip 
-                              texto="Requiere definir si es NIT o Cédula para SIMIT"
-                              className="tooltip-detalle-notif"
-                              posicion="arriba"
-                              soloSiTruncado
-                              soloEnPuntos
-                            >
-                              <span className="notif-c-detalle">
-                                Requiere definir si es NIT o Cédula para SIMIT
-                              </span>
-                            </EtiquetaTooltip>
-                            <span className="enlace-ver-c">
-                              Configurar <ChevronRight size={11} />
-                            </span>
-                          </div>
-                        </div>
-                      )
-                    })}
+                          )
+                        }
 
-                    {/* Comparendos Pagados / Inactivos (ÚNICA notificación para vehículos con comparendo NO activo: ya pagado y retirado del SIMIT) */}
-                    {pestanaActivaA === 'todas' && comparendosPagados.map((pagado) => {
-                      const clave = `pagado-${pagado.id}`
-                      const esLeida = leidas.includes(clave)
-
-                      return (
-                        <div 
-                          key={clave} 
-                          className={`tarjeta-notif-compacta ${esLeida ? 'leida' : 'no-leida'} borde-pagado-pizarra`}
-                          onClick={() => marcarComoLeida(clave)}
-                        >
-                          <div className="notif-c-fila-1">
-                            <div className="notif-c-izq">
-                              {!esLeida && (
-                                <EtiquetaTooltip texto="Alerta nueva sin leer">
-                                  <span className="punto-no-leida" />
-                                </EtiquetaTooltip>
-                              )}
-                              <span className="tag-estado-compacto pagado-pizarra">
-                                <FileCheck size={10} /> Retirado SIMIT
-                              </span>
-                              <span className="placa-texto-c">{pagado.placa}</span>
-                              <span className="chip-desc-c pagado-pizarra">Paz y Salvo</span>
-                            </div>
-                            <span className="monto-pagado-pizarra">
-                              Saldado: ${Math.round(Number(pagado.valor_total || 0)).toLocaleString('es-CO')}
-                            </span>
-                          </div>
-                          <div className="notif-c-fila-2">
-                            <EtiquetaTooltip 
-                              texto={`Comparendo ${pagado.numero_comparendo || ''} en ${pagado.secretaria || 'SIMIT'} • Pago confirmado y retirado de SIMIT`}
-                              className="tooltip-detalle-notif"
-                              posicion="arriba"
-                              soloSiTruncado
-                              soloEnPuntos
-                            >
-                              <span className="notif-c-detalle">
-                                {pagado.secretaria || 'SIMIT'} • Pago confirmado en SIMIT
-                              </span>
-                            </EtiquetaTooltip>
-                            <span 
-                              className="enlace-ver-c"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                manejarAbrirDetalle(pagado, clave)
-                              }}
-                            >
-                              {esLeida ? 'Revisar' : 'Inspeccionar'} <ChevronRight size={11} />
-                            </span>
-                          </div>
-                        </div>
-                      )
-                    })}
+                        return null
+                      })
+                    )}
                   </div>
                 )}
               </div>
