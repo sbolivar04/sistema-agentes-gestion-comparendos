@@ -683,8 +683,9 @@ export function BarraNavegacion({
                                         marcarComoLeida(clave)
                                         setMostrarNotificaciones(false)
                                         if (alSincronizar) {
-                                          const criterioLimpio = (sync.criterio || '').toString().replace(/^(NIT|Placa)\s*/i, '').trim()
-                                          alSincronizar(criterioLimpio, sync.tipo_consulta || 'NIT', sync.empresa)
+                                          const criterioLimpio = (sync.criterio_reintento || sync.criterio || '').toString().replace(/^(NIT|Placa)\s*/i, '').trim()
+                                          const tipoConsulta = (sync.tipo_consulta === 'PLACA') ? 'PLACA' : 'NIT'
+                                          alSincronizar(criterioLimpio, tipoConsulta, sync.empresa)
                                         }
                                       }}
                                     >

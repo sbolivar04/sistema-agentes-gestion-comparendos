@@ -185,6 +185,12 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                 return dt_utc.astimezone(ZONA_HORARIA_COLOMBIA).date() == hoy_colombia
 
             logs_hoy = [l for l in logs_recientes if es_del_dia_de_hoy(l.fecha_ejecucion)]
+            
+            # Mapa con el registro de log más reciente para cada criterio de búsqueda hoy
+            ultimo_log_por_criterio = {}
+            for l in logs_hoy:
+                if l.criterio_busqueda not in ultimo_log_por_criterio:
+                    ultimo_log_por_criterio[l.criterio_busqueda] = l
 
             entidades_dict = {e.criterio_busqueda: e.nombre_entidad for e in entidades_db}
             notificaciones_sincronizacion = []
@@ -231,13 +237,26 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                 if es_corrida_masiva and len(g) >= 2:
                     # --- CONSULTA MASIVA (2 o más NITs o vehículos en una misma consulta) ---
                     total_entidades = len(g)
-                    total_exitosos = sum(1 for item in g if item.exitoso)
-                    fallidos = total_entidades - total_exitosos
-                    fecha_reciente = max(item.fecha_ejecucion for item in g)
+                    items_fallidos_orig = [item for item in g if not item.exitoso]
+                    
+                    # Un item fallido se considera resuelto si existe un log más reciente hoy con exitoso == True
+                    items_fallidos_pendientes = [
+                        item for item in items_fallidos_orig
+                        if not ultimo_log_por_criterio.get(item.criterio_busqueda, item).exitoso
+                    ]
+                    
+                    fallidos = len(items_fallidos_pendientes)
+                    total_exitosos = total_entidades - fallidos
+                    fecha_reciente = max(ultimo_log_por_criterio.get(item.criterio_busqueda, item).fecha_ejecucion for item in g)
                     fecha_formateada = formatear_fecha_colombia(fecha_reciente)
                     id_identificador = getattr(g[0], "id_lote", None) or f"lote-{g[0].id}"
 
                     if fallidos == 0:
+                        mensaje_exito = (
+                            f"Extracción completada sin novedades. Se consultaron las {total_entidades} entidades activas correctamente."
+                            if len(items_fallidos_orig) == 0
+                            else f"Extracción completada. Las {total_entidades} entidades de la flota quedaron al día tras reintento exitoso."
+                        )
                         notificaciones_sincronizacion.append({
                             "id": f"sync-{id_identificador}",
                             "tipo_notificacion": "sync_ok",
@@ -246,26 +265,62 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                             "empresa": "Flota Corporativa FSCR",
                             "criterio": f"{total_entidades}/{total_entidades} entidades al día",
                             "tipo_consulta": "LOTE",
-                            "mensaje": f"Extracción completada sin novedades. Se consultaron las {total_entidades} entidades activas correctamente.",
+                            "mensaje": mensaje_exito,
                             "fecha": fecha_formateada,
                             "es_error": False
                         })
-                    else:
+                    elif fallidos == 1:
+                        fallido = items_fallidos_pendientes[0]
+                        criterio_fallido = fallido.criterio_busqueda
+                        tipo_fallido = fallido.tipo_consulta.value if hasattr(fallido.tipo_consulta, "value") else (fallido.tipo_consulta or "NIT")
+                        nombre_fallido = entidades_dict.get(criterio_fallido) or f"{tipo_fallido} {criterio_fallido}"
+                        
                         notificaciones_sincronizacion.append({
                             "id": f"sync-err-{id_identificador}",
                             "tipo_notificacion": "sync_error",
                             "nivel_alerta": "ROJO",
-                            "titulo": "Fallo parcial en consulta SIMIT",
-                            "empresa": "Flota Corporativa FSCR",
-                            "criterio": f"{fallidos} fallas en flota",
-                            "tipo_consulta": "LOTE",
-                            "mensaje": f"Se consultaron {total_exitosos} de {total_entidades} entidades. {fallidos} requirieron reintento.",
+                            "titulo": f"Fallo al consultar {nombre_fallido}",
+                            "empresa": nombre_fallido,
+                            "criterio": criterio_fallido,
+                            "tipo_consulta": tipo_fallido,
+                            "mensaje": f"SIMIT no respondió para {nombre_fallido}. Las otras {total_entidades - 1} entidades se consultaron con éxito.",
                             "fecha": fecha_formateada,
-                            "es_error": True
+                            "es_error": True,
+                            "criterio_reintento": criterio_fallido
+                        })
+                    else:
+                        criterios_fallidos = [item.criterio_busqueda for item in items_fallidos_pendientes]
+                        nombres_fallidos = [entidades_dict.get(c, c) for c in criterios_fallidos]
+                        primer_fallido = items_fallidos_pendientes[0]
+                        tipo_fallido = primer_fallido.tipo_consulta.value if hasattr(primer_fallido.tipo_consulta, "value") else (primer_fallido.tipo_consulta or "NIT")
+                        
+                        notificaciones_sincronizacion.append({
+                            "id": f"sync-err-{id_identificador}",
+                            "tipo_notificacion": "sync_error",
+                            "nivel_alerta": "ROJO",
+                            "titulo": f"Fallo en {fallidos} entidades de la flota",
+                            "empresa": "Flota Corporativa FSCR",
+                            "criterio": criterios_fallidos[0],
+                            "tipo_consulta": tipo_fallido,
+                            "mensaje": f"Fallaron en SIMIT: {', '.join(nombres_fallidos)}. Reintente la consulta.",
+                            "fecha": fecha_formateada,
+                            "es_error": True,
+                            "criterio_reintento": criterios_fallidos[0]
                         })
                 else:
                     # --- CONSULTA INDIVIDUAL (1 solo vehículo o empresa / NIT) ---
                     item = g[0]
+                    # Si este criterio pertenece a una entidad consolidada en lotes masivos de hoy
+                    # y fue un reintento manual que ya actualizó el lote a exitoso, no duplicar tarjeta
+                    criterios_en_lotes = set()
+                    for grupo_m in grupos_logs:
+                        if len(grupo_m) >= 2 or getattr(grupo_m[0], "origen", None) in ["PROGRAMADO_MASIVO", "MANUAL_MASIVO"]:
+                            for elem in grupo_m:
+                                criterios_en_lotes.add(elem.criterio_busqueda)
+
+                    if item.criterio_busqueda in criterios_en_lotes and getattr(item, "origen", None) == "MANUAL_INDIVIDUAL" and item.exitoso:
+                        continue
+
                     nombre_entidad = entidades_dict.get(item.criterio_busqueda)
                     tipo_doc = item.tipo_consulta.value if hasattr(item.tipo_consulta, "value") else (item.tipo_consulta or "NIT")
 
@@ -299,9 +354,10 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                             "empresa": nombre_entidad,
                             "criterio": item.criterio_busqueda,
                             "tipo_consulta": tipo_doc,
-                            "mensaje": f"No se pudo completar la consulta de {nombre_entidad} en el SIMIT. Puedes reintentar la extracción.",
+                            "mensaje": f"El portal SIMIT no respondió para {nombre_entidad} ({tipo_doc} {item.criterio_busqueda}).",
                             "fecha": fecha_formateada,
-                            "es_error": True
+                            "es_error": True,
+                            "criterio_reintento": item.criterio_busqueda
                         })
 
             return {

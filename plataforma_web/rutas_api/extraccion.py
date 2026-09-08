@@ -47,7 +47,7 @@ def disparar_workflow_github(criterio: Optional[str] = None, tipo_consulta: str 
     
     # Guardar último criterio solicitado para contextualizar mensajes
     _ultimo_criterio_solicitado = criterio.strip() if criterio else None
-    _ultimo_tipo_solicitado = tipo_consulta or "NIT"
+    _ultimo_tipo_solicitado = "PLACA" if (tipo_consulta or "").strip().upper() == "PLACA" else "NIT"
 
     # Protección anti-duplicados: si se disparó hace menos de 25 segundos, evitar disparo redundante
     if ahora - _ultimo_dispatch_ts < 25:
