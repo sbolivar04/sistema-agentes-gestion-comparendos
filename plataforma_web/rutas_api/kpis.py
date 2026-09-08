@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, case
 
 from base_datos.conexion import obtener_sesion_bd
 from base_datos.modelos import ComparendoORM, LogExtraccionORM
@@ -16,18 +16,36 @@ def obtener_metricas_kpi() -> Dict[str, Any]:
     """
     try:
         with obtener_sesion_bd() as sesion:
-            repo = RepositorioBaseDatos(sesion)
-            resumen_bd = repo.obtener_resumen_flota()
+            # Consulta SQL consolidada: calcula todas las métricas en un único viaje a Supabase
+            val_opt = case(
+                (ComparendoORM.aplica_descuento_50 == True, ComparendoORM.valor_con_descuento_50),
+                (ComparendoORM.aplica_descuento_25 == True, ComparendoORM.valor_con_descuento_25),
+                else_=ComparendoORM.valor_total
+            )
+            ahorro_calc = ComparendoORM.valor_total - val_opt
 
-            # Conteo de inactivos
-            stmt_inactivos = select(func.count(ComparendoORM.id)).where(ComparendoORM.estado_simit == 'No activo')
-            total_inactivos = sesion.execute(stmt_inactivos).scalar() or 0
+            stmt_consolidado = select(
+                func.count(ComparendoORM.id).label("total_comparendos"),
+                func.count(case((ComparendoORM.estado_simit == 'Activo', 1))).label("total_activos"),
+                func.count(case((ComparendoORM.estado_simit == 'No activo', 1))).label("total_inactivos"),
+                func.count(case(((ComparendoORM.estado_simit == 'Activo') & (ComparendoORM.aplica_descuento_50 == True), 1))).label("con_descuento_50"),
+                func.count(case(((ComparendoORM.estado_simit == 'Activo') & (ComparendoORM.aplica_descuento_25 == True), 1))).label("con_descuento_25"),
+                func.count(case(((ComparendoORM.aplica_descuento_50 == False) & (ComparendoORM.aplica_descuento_25 == False), 1))).label("sin_descuento"),
+                func.coalesce(func.sum(ComparendoORM.valor_total), 0).label("deuda_total"),
+                func.coalesce(func.sum(case((ComparendoORM.estado_simit == 'Activo', ComparendoORM.valor_total), else_=0)), 0).label("deuda_activa"),
+                func.coalesce(func.sum(val_opt), 0).label("deuda_optimizada_total"),
+                func.coalesce(func.sum(ahorro_calc), 0).label("ahorro_potencial_total"),
+                func.coalesce(func.sum(case((ComparendoORM.estado_simit == 'Activo', ahorro_calc), else_=0)), 0).label("ahorro_potencial_activo")
+            )
+            fila = sesion.execute(stmt_consolidado).one()
+            m = fila._mapping
 
-            # Conteo de activos
-            stmt_activos = select(func.count(ComparendoORM.id)).where(ComparendoORM.estado_simit == 'Activo')
-            total_activos = sesion.execute(stmt_activos).scalar() or 0
+            deuda_total = round(float(m["deuda_total"]))
+            deuda_activa = round(float(m["deuda_activa"]))
+            ahorro_total = round(float(m["ahorro_potencial_total"]))
+            ahorro_activo = round(float(m["ahorro_potencial_activo"]))
 
-            # Última fecha y hora real de sincronización
+            # Última fecha y hora real de sincronización (un solo índice ordenado)
             stmt_ultimo_log = select(LogExtraccionORM.fecha_ejecucion).order_by(desc(LogExtraccionORM.fecha_ejecucion)).limit(1)
             ultima_fecha = sesion.execute(stmt_ultimo_log).scalar()
 
@@ -39,15 +57,19 @@ def obtener_metricas_kpi() -> Dict[str, Any]:
 
             return {
                 "exitoso": True,
-                "deuda_nominal_total": resumen_bd.get("total_valor_nominal", 0),
-                "deuda_optimizada_total": resumen_bd.get("total_valor_con_descuento", 0),
-                "ahorro_potencial_total": resumen_bd.get("ahorro_disponible", 0),
-                "total_comparendos": resumen_bd.get("total_comparendos", 0),
-                "total_activos": total_activos,
-                "total_inactivos": total_inactivos,
-                "con_descuento_50": resumen_bd.get("con_descuento_50", 0),
-                "con_descuento_25": resumen_bd.get("con_descuento_25", 0),
-                "sin_descuento": resumen_bd.get("sin_descuento", 0),
+                "deuda_nominal_total": deuda_total,
+                "deuda_nominal_activa": deuda_activa,
+                "deuda_nominal_inactiva": max(0, deuda_total - deuda_activa),
+                "deuda_optimizada_total": round(float(m["deuda_optimizada_total"])),
+                "ahorro_potencial_total": ahorro_total,
+                "ahorro_potencial_activo": ahorro_activo,
+                "ahorro_potencial_inactivo": max(0, ahorro_total - ahorro_activo),
+                "total_comparendos": m["total_comparendos"],
+                "total_activos": m["total_activos"],
+                "total_inactivos": m["total_inactivos"],
+                "con_descuento_50": m["con_descuento_50"],
+                "con_descuento_25": m["con_descuento_25"],
+                "sin_descuento": m["sin_descuento"],
                 "ultima_sincronizacion": fecha_sincronizacion_texto,
                 "ultima_sincronizacion_iso": ultima_fecha.isoformat() if ultima_fecha else None
             }

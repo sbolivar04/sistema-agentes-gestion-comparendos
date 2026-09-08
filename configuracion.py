@@ -26,6 +26,7 @@ class Configuracion(BaseSettings):
     DB_SCHEMA: str = "comparendos_fscr"
     SUPABASE_URL: str = ""
     GEMINI_API_KEY: str = ""
+    MODELO_GEMINI: str = "gemini-3.8-flash"
     
     # Configuración de GitHub Actions para ejecución en la nube
     GITHUB_TOKEN: str = ""

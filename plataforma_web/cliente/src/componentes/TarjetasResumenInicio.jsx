@@ -3,7 +3,7 @@ import { Car, AlertCircle, AlertTriangle, CheckCircle2, Clock, DollarSign, Flame
 
 export function TarjetasResumenInicio({ metricas = {}, alertas = {} }) {
   const formatoMoneda = (val) => {
-    return `$ ${Number(val || 0).toLocaleString('es-CO')}`
+    return `$ ${Math.round(Number(val || 0)).toLocaleString('es-CO')}`
   }
 
   const totalActivos = metricas.total_activos || metricas.total_comparendos || 0

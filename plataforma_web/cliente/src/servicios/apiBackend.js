@@ -10,17 +10,12 @@ export const apiBackend = {
     return await res.json()
   },
 
-  async obtenerEstadisticas() {
-    const res = await fetch(`${API_BASE}/estadisticas`)
-    return await res.json()
-  },
-
   async obtenerAlertas() {
     const res = await fetch(`${API_BASE}/alertas`)
     return await res.json()
   },
 
-  async obtenerComparendos({ pagina = 1, limite = 5, busqueda = '', estado_simit = 'todos', filtro_descuento = 'todos' }) {
+  async obtenerComparendos({ pagina = 1, limite = 1000, busqueda = '', estado_simit = 'todos', filtro_descuento = 'todos' } = {}) {
     const params = new URLSearchParams({
       pagina,
       limite,
@@ -47,10 +42,12 @@ export const apiBackend = {
   },
 
   async lanzarExtraccion(criterio = '', tipo_consulta = 'NIT') {
+    const crit = (typeof criterio === 'string') ? criterio.trim() : ''
+    const tipo = (typeof tipo_consulta === 'string') ? tipo_consulta.trim() : 'NIT'
     const res = await fetch(`${API_BASE}/extraccion/lanzar`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ criterio, tipo_consulta })
+      body: JSON.stringify({ criterio: crit, tipo_consulta: tipo })
     })
     return await res.json()
   },

@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from typing import List, Tuple, Dict, Any, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 
 from base_datos.modelos import ComparendoORM, LogExtraccionORM, EntidadConsultaORM, PreferenciaConsultaORM
 
@@ -122,9 +122,11 @@ class RepositorioBaseDatos:
         nuevos: int,
         actualizados: int,
         exitoso: bool = True,
-        error: str = None
+        error: str = None,
+        id_lote: Optional[str] = None,
+        origen: Optional[str] = None
     ) -> LogExtraccionORM:
-        """Registra la traza de auditoría de la ejecución de extracción."""
+        """Registra la traza de auditoría de la ejecución de extracción con trazabilidad de lote y origen."""
         log = LogExtraccionORM(
             criterio_busqueda=criterio,
             tipo_consulta=tipo_consulta,
@@ -132,7 +134,9 @@ class RepositorioBaseDatos:
             registros_nuevos=nuevos,
             registros_actualizados=actualizados,
             exitoso=exitoso,
-            mensaje_error=error
+            mensaje_error=error,
+            id_lote=id_lote,
+            origen=origen or ("PROGRAMADO_MASIVO" if id_lote else "MANUAL_INDIVIDUAL")
         )
         self.session.add(log)
         self.session.flush()
@@ -272,11 +276,30 @@ class RepositorioBaseDatos:
             self.session.add(nueva)
         self.session.flush()
 
-    def obtener_resumen_flota(self, criterio_busqueda: str = None) -> Dict[str, Any]:
-        """Genera métricas consolidadas del estado de comparendos de la flota."""
+    def obtener_resumen_flota(self, criterio_busqueda: str = None, estado: Optional[str] = "Activo") -> Dict[str, Any]:
+        """
+        Genera métricas consolidadas del estado de comparendos de la flota.
+        Parámetro estado:
+          - 'Activo' (por defecto): Solo comparendos vigentes / pendientes de pago en SIMIT (deuda real).
+          - 'No activo': Solo comparendos descargados del SIMIT o pagados (histórico resuelto).
+          - 'Todos' o 'Historico': Todo el historial acumulado.
+        """
         stmt = select(ComparendoORM)
         if criterio_busqueda:
             stmt = stmt.where(ComparendoORM.criterio_busqueda == criterio_busqueda)
+
+        # Normalizar y aplicar filtro de estado si no es 'todos' ni 'historico'
+        estado_normalizado = None
+        if estado and str(estado).strip().lower() not in ["todos", "historico", "global", "all"]:
+            texto_estado = str(estado).strip().lower()
+            if any(term in texto_estado for term in ["inactiv", "no activ", "no_activ", "pagad", "descargad", "cancelad", "paz y salvo", "resuelt"]):
+                estado_normalizado = "No activo"
+            elif any(term in texto_estado for term in ["activ", "vigent", "pendient", "mora", "abiert", "deuda"]):
+                estado_normalizado = "Activo"
+            else:
+                estado_normalizado = estado.strip().capitalize()
+            
+            stmt = stmt.where(ComparendoORM.estado_simit == estado_normalizado)
 
         comparendos = self.session.scalars(stmt).all()
 
@@ -295,7 +318,18 @@ class RepositorioBaseDatos:
         comparendos_25_pct = [c for c in comparendos if c.aplica_descuento_25]
         comparendos_sin_descuento = [c for c in comparendos if not c.aplica_descuento_50 and not c.aplica_descuento_25]
 
+        # Conteos globales de auditoría para la flota
+        stmt_totales = select(
+            func.count(case((ComparendoORM.estado_simit == 'Activo', 1))).label("activos"),
+            func.count(case((ComparendoORM.estado_simit == 'No activo', 1))).label("inactivos"),
+            func.count(ComparendoORM.id).label("total_historico")
+        )
+        if criterio_busqueda:
+            stmt_totales = stmt_totales.where(ComparendoORM.criterio_busqueda == criterio_busqueda)
+        conteos = self.session.execute(stmt_totales).first()
+
         return {
+            "estado_consultado": estado_normalizado if estado_normalizado else "Histórico Completo",
             "total_comparendos": total_comparendos,
             "total_valor_nominal": total_nominal,
             "total_valor_optimizado": total_con_descuento_actual,
@@ -303,6 +337,11 @@ class RepositorioBaseDatos:
             "cant_con_descuento_50": len(comparendos_50_pct),
             "cant_con_descuento_25": len(comparendos_25_pct),
             "cant_sin_descuento": len(comparendos_sin_descuento),
+            "resumen_global_flota": {
+                "total_activos_vigentes": conteos[0] if conteos else 0,
+                "total_pagados_o_descargados": conteos[1] if conteos else 0,
+                "total_historico_general": conteos[2] if conteos else 0
+            }
         }
 
 # Alias de compatibilidad

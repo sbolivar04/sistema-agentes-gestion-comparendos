@@ -67,6 +67,8 @@ class LogExtraccionORM(Base):
     registros_actualizados: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     exitoso: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     mensaje_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    id_lote: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    origen: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default="MANUAL_INDIVIDUAL")
 
 class EntidadConsultaORM(Base):
     """

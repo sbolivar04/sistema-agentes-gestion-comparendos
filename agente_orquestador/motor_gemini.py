@@ -13,7 +13,8 @@ from agente_orquestador.herramientas import (
     analizar_riesgo_descuentos,
     evaluar_posible_prescripcion,
     ejecutar_consulta_sql_segura,
-    solicitar_extraccion_en_vivo
+    solicitar_actualizacion_simit,
+    consultar_estado_extraccion_simit
 )
 
 logger = logging.getLogger("MotorGemini")
@@ -25,8 +26,8 @@ class AgenteOrquestadorComparendos:
     operando estrictamente con temperatura 0.0 para evitar alucinaciones.
     """
 
-    def __init__(self, modelo: str = "gemini-3.5-flash-lite"):
-        self.modelo = modelo
+    def __init__(self, modelo: Optional[str] = None):
+        self.modelo = modelo or configuracion.MODELO_GEMINI
         self.client = genai.Client(api_key=configuracion.GEMINI_API_KEY)
         self.herramientas = [
             consultar_resumen_flota,
@@ -35,7 +36,8 @@ class AgenteOrquestadorComparendos:
             analizar_riesgo_descuentos,
             evaluar_posible_prescripcion,
             ejecutar_consulta_sql_segura,
-            solicitar_extraccion_en_vivo
+            solicitar_actualizacion_simit,
+            consultar_estado_extraccion_simit
         ]
         self._iniciar_chat()
 

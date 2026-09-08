@@ -25,15 +25,21 @@ import { ChatAgenteIA } from '../componentes/ChatAgenteIA'
 import { EtiquetaTooltip } from '../componentes/EtiquetaTooltip'
 import { ModalConfirmacion } from '../componentes/ModalConfirmacion'
 import { apiBackend } from '../servicios/apiBackend'
+import { useFlota } from '../contexto/ContextoFlota'
 
 export function PaginaConfiguracion() {
+  const {
+    metricas,
+    alertas,
+    sincronizando,
+    mensajeSync,
+    tipoMensajeSync,
+    limpiarMensajeSync,
+    sincronizarSimit
+  } = useFlota()
+
   const [entidades, setEntidades] = useState([])
-  const [metricas, setMetricas] = useState({})
-  const [alertas, setAlertas] = useState({})
   const [cargando, setCargando] = useState(true)
-  const [sincronizando, setSincronizando] = useState(false)
-  const [mensajeSync, setMensajeSync] = useState('')
-  const [tipoMensajeSync, setTipoMensajeSync] = useState('info') // 'info' | 'exito' | 'error'
   const [chatAbierto, setChatAbierto] = useState(false)
 
   // Filtros de búsqueda
@@ -73,24 +79,16 @@ export function PaginaConfiguracion() {
   const [horaSeleccionada, setHoraSeleccionada] = useState('07:00')
   const [guardandoHorario, setGuardandoHorario] = useState(false)
 
-  // Cargar datos reales
+  // Cargar datos reales de configuración sin peticiones innecesarias
   const cargarDatos = async () => {
     try {
-      const [resEntidades, resKPIs, resAlertas, resProg] = await Promise.all([
+      const [resEntidades, resProg] = await Promise.all([
         apiBackend.obtenerEntidades(),
-        apiBackend.obtenerKPIs(),
-        apiBackend.obtenerAlertas(),
         apiBackend.obtenerProgramacion()
       ])
 
       if (resEntidades && resEntidades.exitoso) {
         setEntidades(resEntidades.entidades || [])
-      }
-      if (resKPIs && resKPIs.exitoso) {
-        setMetricas(resKPIs)
-      }
-      if (resAlertas && resAlertas.exitoso) {
-        setAlertas(resAlertas)
       }
       if (resProg && resProg.exitoso) {
         setProgramacion(resProg)
@@ -113,67 +111,6 @@ export function PaginaConfiguracion() {
     setTimeout(() => {
       setMensajeFeedback({ tipo: '', texto: '' })
     }, 4500)
-  }
-
-  const sincronizarSimit = async () => {
-    setSincronizando(true)
-    setTipoMensajeSync('info')
-    setMensajeSync('Iniciando agente de extracción...')
-    
-    try {
-      const res = await apiBackend.lanzarExtraccion('', 'NIT')
-      if (res && res.exitoso) {
-        setMensajeSync('El agente se está ejecutando y consultando las entidades...')
-        
-        let intentos = 0
-        const intervalPoll = setInterval(async () => {
-          intentos++
-          try {
-            const estadoRes = await apiBackend.obtenerEstadoExtraccion()
-            if (estadoRes) {
-              if (estadoRes.conclusion === 'success' || estadoRes.estado === 'completado') {
-                clearInterval(intervalPoll)
-                setSincronizando(false)
-                setTipoMensajeSync('exito')
-                setMensajeSync('El agente finalizó la extracción y los datos quedaron actualizados.')
-                cargarDatos()
-                setTimeout(() => setMensajeSync(''), 7000)
-              } else if (estadoRes.conclusion === 'failure' || estadoRes.estado === 'error') {
-                clearInterval(intervalPoll)
-                setSincronizando(false)
-                setTipoMensajeSync('error')
-                setMensajeSync(estadoRes.mensaje || 'El agente reportó un inconveniente al consultar SIMIT. No fue posible completar la extracción.')
-                setTimeout(() => setMensajeSync(''), 9000)
-              } else if (estadoRes.en_progreso) {
-                setTipoMensajeSync('info')
-                setMensajeSync(estadoRes.mensaje || 'El agente continúa extrayendo información...')
-              }
-            }
-          } catch (err) {
-            console.error('Error consultando estado del agente:', err)
-          }
-
-          if (intentos > 40) {
-            clearInterval(intervalPoll)
-            setSincronizando(false)
-            setTipoMensajeSync('info')
-            setMensajeSync('El agente sigue procesando. Los datos se actualizarán automáticamente.')
-            setTimeout(() => setMensajeSync(''), 6000)
-          }
-        }, 3000)
-      } else {
-        setSincronizando(false)
-        setTipoMensajeSync('error')
-        setMensajeSync(res?.mensaje || 'No fue posible iniciar el agente.')
-        setTimeout(() => setMensajeSync(''), 6000)
-      }
-    } catch (e) {
-      console.error('Error al sincronizar:', e)
-      setSincronizando(false)
-      setTipoMensajeSync('error')
-      setMensajeSync('No fue posible comunicarse con el servicio en este momento.')
-      setTimeout(() => setMensajeSync(''), 6000)
-    }
   }
 
   // Abrir Modal para Crear
@@ -395,12 +332,24 @@ export function PaginaConfiguracion() {
           <div style={{
             background: tipoMensajeSync === 'error' 
               ? 'var(--color-peligro-suave)' 
+              : tipoMensajeSync === 'advertencia'
+              ? '#fef3c7'
               : tipoMensajeSync === 'info' 
               ? 'var(--azul-suave)' 
               : 'var(--color-exito-suave)',
-            border: `1px solid ${tipoMensajeSync === 'error' ? '#fca5a5' : tipoMensajeSync === 'info' ? '#93c5fd' : '#6ee7b7'}`,
+            border: `1px solid ${
+              tipoMensajeSync === 'error' 
+                ? '#fca5a5' 
+                : tipoMensajeSync === 'advertencia'
+                ? '#fcd34d'
+                : tipoMensajeSync === 'info' 
+                ? '#93c5fd' 
+                : '#6ee7b7'
+            }`,
             color: tipoMensajeSync === 'error' 
               ? 'var(--color-peligro-rojo)' 
+              : tipoMensajeSync === 'advertencia'
+              ? '#92400e'
               : tipoMensajeSync === 'info' 
               ? 'var(--azul-primario)' 
               : '#065f46',
@@ -409,18 +358,42 @@ export function PaginaConfiguracion() {
             marginBottom: '1.5rem',
             display: 'flex',
             alignItems: 'center',
-            gap: '0.5rem',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
             fontSize: '0.9rem',
-            fontWeight: 600
+            fontWeight: 600,
+            boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
           }}>
-            {tipoMensajeSync === 'error' ? (
-              <AlertTriangle size={18} />
-            ) : tipoMensajeSync === 'info' ? (
-              <RefreshCw size={18} className="spin-animation" />
-            ) : (
-              <CheckCircle2 size={18} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              {tipoMensajeSync === 'error' ? (
+                <AlertTriangle size={18} />
+              ) : tipoMensajeSync === 'advertencia' ? (
+                <AlertTriangle size={18} color="#b45309" />
+              ) : tipoMensajeSync === 'info' ? (
+                <RefreshCw size={18} className="spin-animation" />
+              ) : (
+                <CheckCircle2 size={18} color="#059669" />
+              )}
+              <span>{mensajeSync}</span>
+            </div>
+            {!sincronizando && (
+              <button
+                onClick={limpiarMensajeSync}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  color: 'inherit',
+                  opacity: 0.7
+                }}
+                title="Cerrar notificación"
+              >
+                <X size={16} />
+              </button>
             )}
-            <span>{mensajeSync}</span>
           </div>
         )}
 
@@ -1121,15 +1094,18 @@ export function PaginaConfiguracion() {
         } : null}
       />
 
-      {/* Botón Flotante para Asistente IA */}
-      <EtiquetaTooltip texto="Abrir Asistente IA" posicion="izquierda">
-        <button 
-          className="chat-flotante-boton"
-          onClick={() => setChatAbierto(!chatAbierto)}
-        >
-          <MessageSquare size={26} />
-        </button>
-      </EtiquetaTooltip>
+      {/* Botón Flotante para Asistente IA (solo visible cuando el chat está cerrado) */}
+      {!chatAbierto && (
+        <EtiquetaTooltip texto="Hablar con Cuatrojos (Asistente IA)" posicion="izquierda">
+          <button 
+            className="chat-flotante-boton"
+            onClick={() => setChatAbierto(true)}
+            aria-label="Abrir Asistente IA"
+          >
+            <MessageSquare size={26} />
+          </button>
+        </EtiquetaTooltip>
+      )}
 
       {/* Ventana de Chat Flotante */}
       <ChatAgenteIA 

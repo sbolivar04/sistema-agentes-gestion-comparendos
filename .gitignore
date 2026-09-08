@@ -48,3 +48,8 @@ playwright/.cache/
 # Node / Frontend
 node_modules/
 plataforma_web/cliente/node_modules/
+
+# Temporales y Scratch
+scratch/
+test_api.py
+

@@ -53,7 +53,7 @@ jobs:
             echo ">>> Ejecutando consulta específica para ${{ inputs.tipo_consulta }}: ${{ inputs.criterio }}..."
             python -c "
           from agente_extraccion_simit.extractor_principal import ejecutar_extraccion
-          ejecutar_extraccion('${{ inputs.criterio }}', '${{ inputs.tipo_consulta }}', sin_interfaz=True)
+          ejecutar_extraccion('${{ inputs.criterio }}', '${{ inputs.tipo_consulta }}', sin_interfaz=True, origen='MANUAL_INDIVIDUAL')
           "
           else
             echo ">>> Ejecutando extracción automática para toda la flota corporativa..."

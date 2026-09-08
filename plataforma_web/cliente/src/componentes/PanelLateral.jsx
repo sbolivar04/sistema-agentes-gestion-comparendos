@@ -2,7 +2,6 @@ import React from 'react'
 import { useTema } from '../contexto/ContextoTema'
 import { 
   Car, 
-  BarChart3, 
   ChevronLeft, 
   ChevronRight, 
   ShieldCheck,
@@ -14,7 +13,7 @@ export function PanelLateral({
   alCambiarVista, 
   colapsado = true, 
   alAlternarColapso,
-  totalComparendos = 14,
+  totalComparendos = 0,
   alertasConfiguracion = 0
 }) {
   const { esOscuro } = useTema()
@@ -26,12 +25,6 @@ export function PanelLateral({
       icono: Car,
       conteo: totalComparendos,
       activo: vistaActual === 'inicio'
-    },
-    {
-      id: 'metricas',
-      titulo: 'Métricas & Dashboard',
-      icono: BarChart3,
-      activo: vistaActual === 'metricas'
     },
     {
       id: 'configuracion',
@@ -82,7 +75,7 @@ export function PanelLateral({
         )}
       </div>
 
-      {/* Menú con SOLO 2 Hojas: Control y Seguimiento + Métricas & Dashboard */}
+      {/* Menú con 2 Hojas: Control y Seguimiento + Configuración de Consultas */}
       <nav className="panel-lateral-nav">
         {elementosMenu.map((item) => {
           const Icono = item.icono

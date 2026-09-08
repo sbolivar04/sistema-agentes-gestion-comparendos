@@ -6,7 +6,14 @@ from agente_extraccion_simit.festivos_colombia import sumar_dias_habiles
 def calcular_descuentos(comparendo: EsquemaComparendo, fecha_evaluacion: date = None) -> EsquemaComparendo:
     """
     Aplica la lógica legal colombiana para calcular la vigencia de los descuentos
-    del 50% y 25% según la ley de tránsito (Ley 769/2002 Art. 136 y Ley 1843/2017).
+    del 50% y 25% según la ley de tránsito (Ley 769/2002 Art. 136 y Ley 1843/2017 Art. 8).
+    
+    Regla fundamental:
+    Los términos de los descuentos corren EXCLUSIVAMENTE a partir de la fecha de notificación.
+    Si el comparendo aún no ha sido notificado ("En proceso notificación" / None):
+    - Los días hábiles NO han empezado a correr.
+    - El descuento del 50% se encuentra legalmente PRESERVADO/VIGENTE.
+    - No existe fecha límite de vencimiento calculada (fecha_limite_descuento = None).
     
     :param comparendo: Objeto EsquemaComparendo a enriquecer.
     :param fecha_evaluacion: Fecha contra la cual evaluar vigencia (por defecto hoy).
@@ -15,23 +22,31 @@ def calcular_descuentos(comparendo: EsquemaComparendo, fecha_evaluacion: date = 
     if fecha_evaluacion is None:
         fecha_evaluacion = date.today()
 
-    # Fecha base para el cómputo: fecha de notificación (si existe) o fecha de infracción
-    fecha_base_dt = comparendo.fecha_notificacion or comparendo.fecha_infraccion
+    valor_50 = round(comparendo.valor_total * (1.0 - configuracion.PORCENTAJE_DESCUENTO_1), 2)
+    valor_25 = round(comparendo.valor_total * (1.0 - configuracion.PORCENTAJE_DESCUENTO_2), 2)
+    comparendo.valor_con_descuento_50 = valor_50
+    comparendo.valor_con_descuento_25 = valor_25
+
+    # Caso 1: Aún no tiene fecha de notificación oficial ("En proceso notificación")
+    if not comparendo.fecha_notificacion:
+        comparendo.fecha_limite_descuento_50 = None
+        comparendo.fecha_limite_descuento_25 = None
+        comparendo.aplica_descuento_50 = True
+        comparendo.aplica_descuento_25 = False
+        return comparendo
+
+    # Caso 2: Tiene fecha de notificación oficial formal
+    fecha_base_dt = comparendo.fecha_notificacion
     fecha_base = fecha_base_dt.date() if isinstance(fecha_base_dt, datetime) else fecha_base_dt
 
-    # 1. Descuento del 50%: 11 días hábiles a partir de la fecha base
+    # 1. Descuento del 50%: 11 días hábiles a partir de la fecha de notificación
     fecha_limite_50 = sumar_dias_habiles(fecha_base, configuracion.DIAS_HABILES_DESCUENTO_50)
-    valor_50 = round(comparendo.valor_total * (1.0 - configuracion.PORCENTAJE_DESCUENTO_1), 2)
 
-    # 2. Descuento del 25%: 25 días hábiles a partir de la fecha base
+    # 2. Descuento del 25%: 25 días hábiles a partir de la fecha de notificación
     fecha_limite_25 = sumar_dias_habiles(fecha_base, configuracion.DIAS_HABILES_DESCUENTO_25)
-    valor_25 = round(comparendo.valor_total * (1.0 - configuracion.PORCENTAJE_DESCUENTO_2), 2)
 
-    # Asignar resultados al esquema
     comparendo.fecha_limite_descuento_50 = fecha_limite_50
-    comparendo.valor_con_descuento_50 = valor_50
     comparendo.fecha_limite_descuento_25 = fecha_limite_25
-    comparendo.valor_con_descuento_25 = valor_25
 
     # Evaluar si actualmente aplican a la fecha de consulta
     comparendo.aplica_descuento_50 = (fecha_evaluacion <= fecha_limite_50)

@@ -10,7 +10,7 @@ enrutador_comparendos = APIRouter(prefix="/api/comparendos", tags=["Comparendos"
 @enrutador_comparendos.get("")
 def listar_comparendos(
     pagina: int = Query(1, ge=1, description="Número de página (inicia en 1)"),
-    limite: int = Query(5, ge=1, le=100, description="Cantidad de registros por página (por defecto 5)"),
+    limite: int = Query(5, ge=1, le=5000, description="Cantidad de registros por página (por defecto 5)"),
     busqueda: Optional[str] = Query(None, description="Búsqueda por placa, NIT, comparendo o secretaría"),
     estado_simit: Optional[str] = Query("todos", description="Activo, No activo o todos"),
     filtro_descuento: Optional[str] = Query("todos", description="50, 25, sin_descuento o todos")
@@ -23,19 +23,24 @@ def listar_comparendos(
         with obtener_sesion_bd() as sesion:
             consulta = select(ComparendoORM)
 
-            # 1. Filtro de búsqueda
+            # 1. Filtro de búsqueda (admite término único o múltiples placas separadas por coma)
             if busqueda and busqueda.strip():
-                termino = f"%{busqueda.strip()}%"
-                consulta = consulta.where(
-                    or_(
-                        ComparendoORM.placa.ilike(termino),
-                        ComparendoORM.criterio_busqueda.ilike(termino),
-                        ComparendoORM.numero_comparendo.ilike(termino),
-                        ComparendoORM.codigo_infraccion.ilike(termino),
-                        ComparendoORM.secretaria.ilike(termino),
-                        ComparendoORM.descripcion_infraccion.ilike(termino)
+                partes = [p.strip() for p in busqueda.split(",") if p.strip()]
+                if len(partes) > 1:
+                    condiciones = [ComparendoORM.placa.ilike(f"%{p}%") for p in partes]
+                    consulta = consulta.where(or_(*condiciones))
+                else:
+                    termino = f"%{busqueda.strip()}%"
+                    consulta = consulta.where(
+                        or_(
+                            ComparendoORM.placa.ilike(termino),
+                            ComparendoORM.criterio_busqueda.ilike(termino),
+                            ComparendoORM.numero_comparendo.ilike(termino),
+                            ComparendoORM.codigo_infraccion.ilike(termino),
+                            ComparendoORM.secretaria.ilike(termino),
+                            ComparendoORM.descripcion_infraccion.ilike(termino)
+                        )
                     )
-                )
 
             # 2. Filtro de Estado SIMIT
             if estado_simit and estado_simit.lower() != "todos":
@@ -64,14 +69,22 @@ def listar_comparendos(
 
             lista = []
             for c in registros:
-                # Determinar etiqueta de descuento
+                # Determinar etiqueta de descuento y fecha límite legal
                 if c.aplica_descuento_50:
-                    tag_desc = "50% Vigente"
-                    fecha_lim = str(c.fecha_limite_descuento_50)
+                    if c.fecha_limite_descuento_50:
+                        tag_desc = "50% Vigente"
+                        fecha_lim = str(c.fecha_limite_descuento_50)
+                    else:
+                        tag_desc = "50% (Sin Notificar)"
+                        fecha_lim = "Pendiente Notificación"
                     val_pagar = c.valor_con_descuento_50
                 elif c.aplica_descuento_25:
-                    tag_desc = "25% Vigente"
-                    fecha_lim = str(c.fecha_limite_descuento_25)
+                    if c.fecha_limite_descuento_25:
+                        tag_desc = "25% Vigente"
+                        fecha_lim = str(c.fecha_limite_descuento_25)
+                    else:
+                        tag_desc = "25% Vigente"
+                        fecha_lim = "Pendiente Notificación"
                     val_pagar = c.valor_con_descuento_25
                 else:
                     tag_desc = "Sin Descuento"
@@ -90,14 +103,15 @@ def listar_comparendos(
                     "secretaria": c.secretaria,
                     "direccion": c.direccion,
                     "fecha_infraccion": c.fecha_infraccion.strftime("%Y-%m-%d %H:%M") if c.fecha_infraccion else "N/A",
-                    "fecha_notificacion": c.fecha_notificacion.strftime("%Y-%m-%d") if c.fecha_notificacion else "N/A",
-                    "valor_nominal": c.valor,
-                    "intereses": c.intereses,
-                    "valor_total": c.valor_total,
+                    "fecha_notificacion": c.fecha_notificacion.strftime("%Y-%m-%d") if c.fecha_notificacion else "En proceso de notificación",
+                    "fecha_resolucion": c.fecha_resolucion.strftime("%Y-%m-%d") if c.fecha_resolucion else None,
+                    "valor_nominal": round(float(c.valor)) if c.valor else 0,
+                    "intereses": round(float(c.intereses)) if c.intereses else 0,
+                    "valor_total": round(float(c.valor_total)) if c.valor_total else 0,
                     "etiqueta_descuento": tag_desc,
                     "fecha_limite_descuento": fecha_lim,
-                    "valor_a_pagar": val_pagar,
-                    "ahorro_disponible": c.valor_total - val_pagar if val_pagar else 0,
+                    "valor_a_pagar": round(float(val_pagar)) if val_pagar else 0,
+                    "ahorro_disponible": round(float(c.valor_total - val_pagar)) if (val_pagar and c.valor_total) else 0,
                     "estado_simit": c.estado_simit
                 })
 

@@ -1,6 +1,7 @@
 import sys
 import re
 import logging
+from typing import Optional
 from pathlib import Path
 
 DIRECTORIO_BASE = Path(__file__).resolve().parent.parent
@@ -18,7 +19,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ExtractorPrincipal")
 
-def ejecutar_extraccion(criterio: str, tipo_consulta: str, sin_interfaz: bool = False):
+def ejecutar_extraccion(
+    criterio: str,
+    tipo_consulta: str = "NIT",
+    sin_interfaz: bool = False,
+    id_lote: Optional[str] = None,
+    origen: Optional[str] = None
+):
     """Inicializa la BD, ejecuta la extracción en SIMIT y persiste los resultados en Supabase."""
     print("\n" + "=" * 80)
     print("      AGENTE DE EXTRACCIÓN Y VALIDACIÓN DE COMPARENDOS SIMIT (IA FLOTAS)     ")
@@ -46,6 +53,22 @@ def ejecutar_extraccion(criterio: str, tipo_consulta: str, sin_interfaz: bool = 
 
     if not resultado.exitoso:
         print(f"\n[ERROR / RESPUESTA DE SIMIT]: {resultado.mensaje_error}")
+        try:
+            with obtener_sesion_bd() as sesion:
+                repo = RepositorioBaseDatos(sesion)
+                repo.registrar_log_extraccion(
+                    criterio=resultado.criterio_busqueda if hasattr(resultado, 'criterio_busqueda') else criterio,
+                    tipo_consulta=resultado.tipo_consulta.value if hasattr(resultado, 'tipo_consulta') and hasattr(resultado.tipo_consulta, 'value') else tipo_consulta,
+                    encontrados=0,
+                    nuevos=0,
+                    actualizados=0,
+                    exitoso=False,
+                    error=resultado.mensaje_error[:500] if resultado.mensaje_error else "Error de conexión o portal no disponible en SIMIT",
+                    id_lote=id_lote,
+                    origen=origen or ("PROGRAMADO_MASIVO" if id_lote else "MANUAL_INDIVIDUAL")
+                )
+        except Exception as e_log:
+            print(f"[AUDITORÍA] Advertencia: No se pudo registrar log de fallo en Supabase: {e_log}")
         return resultado
 
     if resultado.mensaje_error and "Requiere configurar" in resultado.mensaje_error:
@@ -64,7 +87,9 @@ def ejecutar_extraccion(criterio: str, tipo_consulta: str, sin_interfaz: bool = 
             encontrados=resultado.total_comparendos,
             nuevos=nuevos,
             actualizados=actualizados,
-            exitoso=True
+            exitoso=True,
+            id_lote=id_lote,
+            origen=origen or ("PROGRAMADO_MASIVO" if id_lote else "MANUAL_INDIVIDUAL")
         )
 
     # 5. Imprimir resumen

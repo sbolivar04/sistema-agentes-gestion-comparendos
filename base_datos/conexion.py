@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 motor = create_engine(
     configuracion.DATABASE_URL,
     connect_args={"options": f"-csearch_path={configuracion.DB_SCHEMA},public"},
+    pool_size=5,
+    max_overflow=5,
+    pool_timeout=30,
     pool_pre_ping=True,
     pool_recycle=300,
     echo=False

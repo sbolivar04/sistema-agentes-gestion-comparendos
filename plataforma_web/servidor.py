@@ -6,7 +6,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from plataforma_web.rutas_api.kpis import enrutador_kpis
-from plataforma_web.rutas_api.estadisticas import enrutador_estadisticas
 from plataforma_web.rutas_api.alertas import enrutador_alertas
 from plataforma_web.rutas_api.comparendos import enrutador_comparendos
 from plataforma_web.rutas_api.chat import enrutador_chat
@@ -17,8 +16,8 @@ from plataforma_web.rutas_api.programacion import enrutador_programacion
 # Version 1.0.3 - Programacion y horario dinamico desde cron.job
 app = FastAPI(
     title="Sistema de Gestión y Seguimiento de Comparendos SIMIT - FSCR Ingeniería",
-    description="Plataforma de Inteligencia Artificial y Dashboard para Flotas Corporativas",
-    version="1.0.3"
+    description="Plataforma de Inteligencia Artificial para Flotas Corporativas",
+    version="1.0.4"
 )
 
 # Configurar CORS
@@ -32,7 +31,6 @@ app.add_middleware(
 
 # Registrar enrutadores de API
 app.include_router(enrutador_kpis)
-app.include_router(enrutador_estadisticas)
 app.include_router(enrutador_alertas)
 app.include_router(enrutador_comparendos)
 app.include_router(enrutador_chat)

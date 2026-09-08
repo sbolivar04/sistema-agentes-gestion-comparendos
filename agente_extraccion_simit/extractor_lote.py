@@ -1,5 +1,8 @@
 import os
 import sys
+import uuid
+from datetime import datetime
+from typing import Optional
 import logging
 from pathlib import Path
 
@@ -44,10 +47,17 @@ def obtener_entidades_activas() -> list[dict]:
 
     return entidades
 
-def ejecutar_extraccion_lote(sin_interfaz: bool = True):
-    """Ejecuta la extracción secuencial para todas las entidades activas de la flota corporativa."""
+def ejecutar_extraccion_lote(
+    sin_interfaz: bool = True,
+    id_lote: Optional[str] = None,
+    origen: str = "PROGRAMADO_MASIVO"
+):
+    """Ejecuta la extracción secuencial para todas las entidades activas de la flota corporativa con trazabilidad de lote."""
+    if not id_lote:
+        id_lote = f"lote_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+
     logger.info("=" * 80)
-    logger.info(" INICIANDO EXTRACCIÓN AUTOMÁTICA EN LOTE PARA FLOTA CORPORATIVA")
+    logger.info(f" INICIANDO EXTRACCIÓN AUTOMÁTICA EN LOTE PARA FLOTA CORPORATIVA (ID Lote: {id_lote})")
     logger.info("=" * 80)
 
     # 1. Asegurar base de datos inicializada
@@ -64,6 +74,7 @@ def ejecutar_extraccion_lote(sin_interfaz: bool = True):
         "total_ahorro": 0.0,
         "errores": 0
     }
+    detalles_errores = []
 
     for idx, item in enumerate(empresas, 1):
         empresa = item["empresa"]
@@ -72,7 +83,13 @@ def ejecutar_extraccion_lote(sin_interfaz: bool = True):
         logger.info(f"\n[{idx}/{len(empresas)}] Procesando {empresa} ({tipo_doc}: {criterio})...")
 
         try:
-            resultado = ejecutar_extraccion(criterio=criterio, tipo_consulta=tipo_doc, sin_interfaz=sin_interfaz)
+            resultado = ejecutar_extraccion(
+                criterio=criterio,
+                tipo_consulta=tipo_doc,
+                sin_interfaz=sin_interfaz,
+                id_lote=id_lote,
+                origen=origen
+            )
             if resultado and resultado.exitoso:
                 totales["empresas_procesadas"] += 1
                 totales["total_comparendos"] += resultado.total_comparendos
@@ -80,9 +97,28 @@ def ejecutar_extraccion_lote(sin_interfaz: bool = True):
                 totales["total_ahorro"] += (resultado.total_valor_total - resultado.total_valor_con_descuento_vigente)
             else:
                 totales["errores"] += 1
+                motivo = resultado.mensaje_error if resultado and resultado.mensaje_error else "SIMIT no respondió"
+                detalles_errores.append(f"{empresa} ({criterio}): {motivo}")
         except Exception as e:
-            logger.error(f"Error procesando {tipo_doc} {criterio} ({empresa}): {e}")
+            logger.error(f"Error inesperado procesando {tipo_doc} {criterio} ({empresa}): {e}")
             totales["errores"] += 1
+            detalles_errores.append(f"{empresa} ({criterio}): {str(e)}")
+            try:
+                with obtener_sesion_bd() as sesion:
+                    repo = RepositorioBaseDatos(sesion)
+                    repo.registrar_log_extraccion(
+                        criterio=criterio,
+                        tipo_consulta=tipo_doc,
+                        encontrados=0,
+                        nuevos=0,
+                        actualizados=0,
+                        exitoso=False,
+                        error=str(e)[:500],
+                        id_lote=id_lote,
+                        origen=origen
+                    )
+            except Exception as e_bd:
+                logger.error(f"No se pudo registrar log de error en Supabase: {e_bd}")
 
     # 3. Resumen final consolidado
     print("\n" + "=" * 80)
@@ -93,7 +129,16 @@ def ejecutar_extraccion_lote(sin_interfaz: bool = True):
     print(f" Valor Total Comparendos     : ${totales['total_valor']:,.2f} COP")
     print(f" Ahorro Potencial Disponible : ${totales['total_ahorro']:,.2f} COP")
     print(f" Total Errores               : {totales['errores']}")
+    if detalles_errores:
+        print("-" * 80)
+        print(" DETALLE DE ENTIDADES CON ERROR:")
+        for det in detalles_errores:
+            print(f"  • {det}")
     print("=" * 80)
+
+    if totales["errores"] > 0 and totales["empresas_procesadas"] == 0:
+        logger.error("Fallo total en la extracción: Ninguna entidad de la flota pudo ser consultada en SIMIT.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     ejecutar_extraccion_lote(sin_interfaz=True)
