@@ -24,5 +24,13 @@ class ClienteSimit:
         logger.info(f"Iniciando consulta puntual en vivo para Placa: {placa}")
         return self.cliente_navegador.consultar_en_vivo(placa, tipo_consulta="PLACA")
 
+    def consultar_lote(self, lista_consultas: list, callback_procesamiento=None) -> list:
+        """
+        Consulta en tiempo real en SIMIT para una lista de entidades en una sola sesión continua.
+        Abre el portal una sola vez, cierra anuncios iniciales y reutiliza la barra superior de búsqueda.
+        """
+        logger.info(f"Iniciando consulta en lote continua para {len(lista_consultas)} entidades...")
+        return self.cliente_navegador.consultar_lote_en_vivo(lista_consultas, callback_procesamiento)
+
 # Alias de compatibilidad
 SimitClient = ClienteSimit

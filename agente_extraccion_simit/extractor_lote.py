@@ -11,7 +11,8 @@ sys.path.insert(0, str(DIRECTORIO_BASE))
 
 from base_datos.conexion import inicializar_base_datos, obtener_sesion_bd
 from base_datos.repositorio import RepositorioBaseDatos
-from agente_extraccion_simit.extractor_principal import ejecutar_extraccion
+from agente_extraccion_simit.cliente import ClienteSimit
+from agente_extraccion_simit.extractor_principal import guardar_resultado_extraccion
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,12 +53,16 @@ def ejecutar_extraccion_lote(
     id_lote: Optional[str] = None,
     origen: str = "PROGRAMADO_MASIVO"
 ):
-    """Ejecuta la extracción secuencial para todas las entidades activas de la flota corporativa con trazabilidad de lote."""
+    """
+    Ejecuta la extracción secuencial para todas las entidades activas de la flota corporativa
+    en UNA SOLA SESIÓN CONTINUA de navegador, reutilizando la caja superior de búsqueda de SIMIT.
+    """
     if not id_lote:
         id_lote = f"lote_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
     logger.info("=" * 80)
-    logger.info(f" INICIANDO EXTRACCIÓN AUTOMÁTICA EN LOTE PARA FLOTA CORPORATIVA (ID Lote: {id_lote})")
+    logger.info(f" INICIANDO EXTRACCIÓN MASIVA CONTINUA PARA FLOTA CORPORATIVA (ID Lote: {id_lote})")
+    logger.info(f" Modo de navegación: {'Segundo plano (Headless)' if sin_interfaz else 'Visual en pantalla'}")
     logger.info("=" * 80)
 
     # 1. Asegurar base de datos inicializada
@@ -66,6 +71,10 @@ def ejecutar_extraccion_lote(
     # 2. Cargar entidades desde Supabase
     empresas = obtener_entidades_activas()
     logger.info(f"Se encontraron {len(empresas)} entidades activas en Supabase para procesar.")
+
+    if not empresas:
+        logger.warning("No hay entidades activas configuradas para consultar.")
+        return
 
     totales = {
         "empresas_procesadas": 0,
@@ -76,53 +85,71 @@ def ejecutar_extraccion_lote(
     }
     detalles_errores = []
 
-    for idx, item in enumerate(empresas, 1):
-        empresa = item["empresa"]
-        criterio = item.get("criterio") or item.get("nit")
-        tipo_doc = item.get("tipo_documento") or "NIT"
-        logger.info(f"\n[{idx}/{len(empresas)}] Procesando {empresa} ({tipo_doc}: {criterio})...")
+    # 3. Callback para persistir y reportar cada entidad inmediatamente al completar su búsqueda
+    def al_procesar_entidad(item: dict, resultado):
+        empresa = item.get("empresa") or item.get("criterio")
+        criterio = item.get("criterio") or item.get("nit") or item.get("placa")
+        tipo_doc = item.get("tipo_documento") or ("NIT" if str(criterio).isdigit() else "PLACA")
 
         try:
-            resultado = ejecutar_extraccion(
-                criterio=criterio,
-                tipo_consulta=tipo_doc,
-                sin_interfaz=sin_interfaz,
-                id_lote=id_lote,
-                origen=origen
-            )
             if resultado and resultado.exitoso:
                 totales["empresas_procesadas"] += 1
                 totales["total_comparendos"] += resultado.total_comparendos
                 totales["total_valor"] += resultado.total_valor_total
                 totales["total_ahorro"] += (resultado.total_valor_total - resultado.total_valor_con_descuento_vigente)
+                guardar_resultado_extraccion(
+                    resultado=resultado,
+                    criterio=criterio,
+                    tipo_consulta=tipo_doc,
+                    id_lote=id_lote,
+                    origen=origen
+                )
             else:
                 totales["errores"] += 1
                 motivo = resultado.mensaje_error if resultado and resultado.mensaje_error else "SIMIT no respondió"
                 detalles_errores.append(f"{empresa} ({criterio}): {motivo}")
-        except Exception as e:
-            logger.error(f"Error inesperado procesando {tipo_doc} {criterio} ({empresa}): {e}")
-            totales["errores"] += 1
-            detalles_errores.append(f"{empresa} ({criterio}): {str(e)}")
-            try:
-                with obtener_sesion_bd() as sesion:
-                    repo = RepositorioBaseDatos(sesion)
-                    repo.registrar_log_extraccion(
-                        criterio=criterio,
-                        tipo_consulta=tipo_doc,
-                        encontrados=0,
-                        nuevos=0,
-                        actualizados=0,
-                        exitoso=False,
-                        error=str(e)[:500],
-                        id_lote=id_lote,
-                        origen=origen
-                    )
-            except Exception as e_bd:
-                logger.error(f"No se pudo registrar log de error en Supabase: {e_bd}")
+                guardar_resultado_extraccion(
+                    resultado=resultado,
+                    criterio=criterio,
+                    tipo_consulta=tipo_doc,
+                    id_lote=id_lote,
+                    origen=origen
+                )
+        except Exception as e_persistencia:
+            logger.error(f"Error al persistir resultado para {criterio} ({empresa}): {e_persistencia}")
 
-    # 3. Resumen final consolidado
+    # 4. Iniciar cliente de navegación y ejecutar todas las entidades en una sola carga
+    cliente = ClienteSimit(sin_interfaz=sin_interfaz)
+    try:
+        cliente.consultar_lote(empresas, callback_procesamiento=al_procesar_entidad)
+    except Exception as e_general:
+        logger.error(f"Error crítico durante la sesión continua de extracción en lote: {e_general}")
+        for item in empresas:
+            criterio = item.get("criterio") or item.get("nit")
+            empresa = item.get("empresa") or criterio
+            tipo_doc = item.get("tipo_documento") or "NIT"
+            if not any(criterio in det for det in detalles_errores) and totales["empresas_procesadas"] == 0:
+                detalles_errores.append(f"{empresa} ({criterio}): {str(e_general)}")
+                try:
+                    with obtener_sesion_bd() as sesion:
+                        repo = RepositorioBaseDatos(sesion)
+                        repo.registrar_log_extraccion(
+                            criterio=criterio,
+                            tipo_consulta=tipo_doc,
+                            encontrados=0,
+                            nuevos=0,
+                            actualizados=0,
+                            exitoso=False,
+                            error=str(e_general)[:500],
+                            id_lote=id_lote,
+                            origen=origen
+                        )
+                except Exception:
+                    pass
+
+    # 5. Resumen final consolidado
     print("\n" + "=" * 80)
-    print("      RESUMEN FINAL DE LA EXTRACCIÓN EN LOTE (GITHUB ACTIONS / CRON)     ")
+    print("      RESUMEN FINAL DE LA EXTRACCIÓN EN LOTE CONTINUA (OPTIMIZADA)       ")
     print("=" * 80)
     print(f" Empresas Procesadas Exitosas: {totales['empresas_procesadas']}/{len(empresas)}")
     print(f" Total Comparendos Activos   : {totales['total_comparendos']}")
@@ -140,5 +167,9 @@ def ejecutar_extraccion_lote(
         logger.error("Fallo total en la extracción: Ninguna entidad de la flota pudo ser consultada en SIMIT.")
         sys.exit(1)
 
+def main():
+    sin_interfaz = "--visual" not in sys.argv and "--con-interfaz" not in sys.argv
+    ejecutar_extraccion_lote(sin_interfaz=sin_interfaz)
+
 if __name__ == "__main__":
-    ejecutar_extraccion_lote(sin_interfaz=True)
+    main()

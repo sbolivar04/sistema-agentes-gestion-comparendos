@@ -51,6 +51,24 @@ def ejecutar_extraccion(
         print(f"\n[PASO 1] Consultando SIMIT en vivo para la Placa: {criterio}")
         resultado = cliente.consultar_por_placa(criterio)
 
+    # 4. Guardar en Base de Datos y reportar
+    guardar_resultado_extraccion(
+        resultado=resultado,
+        criterio=criterio,
+        tipo_consulta=tipo_consulta,
+        id_lote=id_lote,
+        origen=origen
+    )
+    return resultado
+
+def guardar_resultado_extraccion(
+    resultado,
+    criterio: str,
+    tipo_consulta: str = "NIT",
+    id_lote: Optional[str] = None,
+    origen: Optional[str] = None
+) -> tuple[int, int]:
+    """Persiste los resultados de la consulta en Supabase, registra auditoría y presenta el reporte en consola."""
     if not resultado.exitoso:
         print(f"\n[ERROR / RESPUESTA DE SIMIT]: {resultado.mensaje_error}")
         try:
@@ -69,21 +87,23 @@ def ejecutar_extraccion(
                 )
         except Exception as e_log:
             print(f"[AUDITORÍA] Advertencia: No se pudo registrar log de fallo en Supabase: {e_log}")
-        return resultado
+        return 0, 0
 
     if resultado.mensaje_error and "Requiere configurar" in resultado.mensaje_error:
         print(f"\n[AVISO DEL AGENTE]: El documento {criterio} requiere que se defina si es NIT o Cédula en la plataforma web. Se generó la alerta para su configuración.")
-        return resultado
+        return 0, 0
 
-    # 4. Guardar en Base de Datos (Supabase)
-    print("\n[PASO 2] Persistiendo y actualizando datos en Supabase Cloud (comparendos_fscr)...")
+    # Guardar en Base de Datos (Supabase)
+    print(f"\n[PERSISTENCIA] Guardando datos en Supabase Cloud (comparendos_fscr) para {resultado.criterio_busqueda}...")
+    nuevos = 0
+    actualizados = 0
     with obtener_sesion_bd() as sesion:
         repo = RepositorioBaseDatos(sesion)
         nuevos, actualizados = repo.guardar_comparendos(resultado.comparendos, resultado.criterio_busqueda)
         
         repo.registrar_log_extraccion(
             criterio=resultado.criterio_busqueda,
-            tipo_consulta=resultado.tipo_consulta.value,
+            tipo_consulta=resultado.tipo_consulta.value if hasattr(resultado.tipo_consulta, 'value') else str(resultado.tipo_consulta),
             encontrados=resultado.total_comparendos,
             nuevos=nuevos,
             actualizados=actualizados,
@@ -92,7 +112,7 @@ def ejecutar_extraccion(
             origen=origen or ("PROGRAMADO_MASIVO" if id_lote else "MANUAL_INDIVIDUAL")
         )
 
-    # 5. Imprimir resumen
+    # Imprimir resumen
     print("\n" + "=" * 80)
     print(f"       RESULTADOS DE LA EXTRACCIÓN EN VIVO ({tipo_consulta}: {criterio})       ")
     print("=" * 80)
@@ -107,7 +127,7 @@ def ejecutar_extraccion(
 
     if resultado.total_comparendos == 0:
         print("\n [SIMIT CONFIRMA]: No existen comparendos registrados para este criterio en el portal oficial.")
-        return resultado
+        return nuevos, actualizados
 
     print("\n>>> DETALLE DE COMPARENDOS EXTRAÍDOS REALES:")
     for idx, c in enumerate(resultado.comparendos, 1):
@@ -135,7 +155,7 @@ def ejecutar_extraccion(
         else:
             print(f"     [DESCUENTO VENCIDO] Debe pagar el 100%: ${c.valor_total:,.2f} COP")
 
-    return resultado
+    return nuevos, actualizados
 
 def main():
     sin_interfaz = "--sin-interfaz" in sys.argv or "--headless" in sys.argv
@@ -153,26 +173,31 @@ def main():
     print("      AGENTE DE EXTRACCIÓN Y VALIDACIÓN DE COMPARENDOS SIMIT (IA FLOTAS)     ")
     print("=" * 80)
     print("Seleccione la opción o digite directamente el NIT / Placa a consultar:")
-    print(" 1. Consulta Masiva por NIT Corporativo (Visual)")
-    print(" 2. Consulta Puntual por Placa Vehicular (Visual)")
-    print(" 3. Consulta en Segundo Plano / Headless (Sin ventana gráfica)")
-    print(" 4. Salir")
+    print(" 1. Sincronizar Flota Completa (Sesión continua optimizada)")
+    print(" 2. Consulta Individual por NIT Corporativo (Visual)")
+    print(" 3. Consulta Puntual por Placa Vehicular (Visual)")
+    print(" 4. Consulta en Segundo Plano / Headless (Sin ventana gráfica)")
+    print(" 5. Salir")
     print("-" * 80)
-    opcion = input("Digite 1, 2, 3 o ingrese directamente la Placa / NIT: ").strip().upper()
+    opcion = input("Digite 1, 2, 3, 4 o ingrese directamente la Placa / NIT: ").strip().upper()
 
-    if not opcion or opcion == "4":
+    if not opcion or opcion in ["5", "SALIR", "EXIT"]:
         print("Operación finalizada.")
         return
 
     if opcion == "1":
+        from agente_extraccion_simit.extractor_lote import ejecutar_extraccion_lote
+        print("\n[INICIANDO]: Sincronización continua de la flota corporativa en vivo...")
+        ejecutar_extraccion_lote(sin_interfaz=False, origen="MANUAL_MASIVO")
+    elif opcion == "2":
         nit = input("\nIngrese el NIT corporativo a consultar: ").strip()
         if nit:
             ejecutar_extraccion(nit, "NIT", sin_interfaz=False)
-    elif opcion == "2":
+    elif opcion == "3":
         placa = input("\nIngrese la placa del vehículo a consultar: ").strip().upper()
         if placa:
             ejecutar_extraccion(placa, "PLACA", sin_interfaz=False)
-    elif opcion == "3":
+    elif opcion == "4":
         criterio = input("\nIngrese el NIT o Placa a consultar en segundo plano: ").strip()
         if criterio:
             param_limpio = re.sub(r'[^A-Z0-9]', '', criterio.upper())
