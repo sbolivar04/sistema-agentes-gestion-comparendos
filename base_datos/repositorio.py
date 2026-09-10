@@ -213,7 +213,7 @@ class RepositorioBaseDatos:
         if tipo_documento is not None:
             entidad.tipo_documento = tipo_documento.strip()
             # Si el usuario asigna un tipo válido, se apaga la alerta de desambiguación
-            if entidad.tipo_documento in ["NIT", "Cédula", "Cédula de Ciudadanía"]:
+            if entidad.tipo_documento in ["NIT", "Cédula", "Cédula de Ciudadanía", "AMBOS"]:
                 entidad.requiere_desambiguacion = False
         if activo is not None:
             entidad.activo = activo

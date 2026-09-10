@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field, field_validator
 class TipoConsulta(str, Enum):
     NIT = "NIT"
     PLACA = "PLACA"
+    AMBOS = "AMBOS"
+    CEDULA = "CEDULA"
 
 class EstadoComparendo(str, Enum):
     COMPARENDO = "COMPARENDO"
