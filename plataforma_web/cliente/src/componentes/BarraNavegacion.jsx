@@ -317,13 +317,25 @@ export function BarraNavegacion({
     ? (SYNC_CASOS[escenarioPrueba] || [])
     : (alertas.notificaciones_sincronizacion || [])
 
-  // Clave dinámica para alertas de vencimiento sensible al conteo regresivo de días hábiles restantes.
-  // Permite que cuando cambien los días (ej. de 4 días ayer a 3 días hoy), la notificación vuelva a aparecer
-  // como NO LEÍDA automáticamente, garantizando que el usuario se entere de la actualización diaria.
+  // Obtener fecha actual en formato local Colombia (YYYY-MM-DD)
+  const obtenerFechaHoyLocal = () => {
+    const ahora = new Date()
+    const anio = ahora.getFullYear()
+    const mes = String(ahora.getMonth() + 1).padStart(2, '0')
+    const dia = String(ahora.getDate()).padStart(2, '0')
+    return `${anio}-${mes}-${dia}`
+  }
+
+  // Clave dinámica para alertas de vencimiento sensible a la fecha del día y a los días hábiles restantes.
+  // Permite que durante el mismo día (mismo YYYY-MM-DD y mismos días restantes), si se lee, se mantenga LEÍDA
+  // aunque se refresque la página. Al día siguiente (nueva fecha o menos días restantes), la clave cambia
+  // automáticamente y vuelve a aparecer como NO LEÍDA con el nuevo plazo.
   const obtenerClaveVencimiento = (v) => {
+    const idComparendo = v.id || v.numero_comparendo || v.placa || ''
     const dias = v.dias_habiles_restantes !== undefined ? v.dias_habiles_restantes : ''
     const tipo = v.tipo_descuento || ''
-    return `venc-${v.id || v.numero_comparendo}-${tipo}-${dias}d`
+    const fechaHoy = obtenerFechaHoyLocal()
+    return `venc-${idComparendo}-${tipo}-${dias}d-${fechaHoy}`
   }
 
   // Lista de todas las claves únicas activas para cálculo de pendientes
@@ -335,13 +347,21 @@ export function BarraNavegacion({
     ...alertasSync.map(s => `sync-${s.id}`)
   ]
 
-  // Limpieza automática de notificaciones leídas de vencimiento correspondientes a días anteriores
+  // Limpieza automática de notificaciones leídas obsoletas de días anteriores
   useEffect(() => {
+    // Si aún no se han cargado las alertas del API (primer render al refrescar), NO limpiar nada
+    if (todasLasClaves.length === 0) return
+
     setLeidas((prev) => {
+      if (!prev || prev.length === 0) return prev
+      const fechaHoy = obtenerFechaHoyLocal()
+
+      // Mantener las claves que pertenecen al día de hoy o que corresponden a alertas activas
       const clavesValidas = prev.filter((c) => {
         if (!c.startsWith('venc-')) return true
-        return todasLasClaves.includes(c)
+        return todasLasClaves.includes(c) || c.endsWith(fechaHoy)
       })
+
       if (clavesValidas.length !== prev.length) {
         try {
           localStorage.setItem('fscr_notificaciones_leidas', JSON.stringify(clavesValidas))
@@ -351,6 +371,7 @@ export function BarraNavegacion({
       return prev
     })
   }, [todasLasClaves.join(',')])
+
 
   const marcarTodasComoLeidas = () => {
     const conjuntoActualizado = Array.from(new Set([...leidas, ...todasLasClaves]))
