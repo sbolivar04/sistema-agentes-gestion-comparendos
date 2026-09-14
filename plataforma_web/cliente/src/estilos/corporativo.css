@@ -13,6 +13,7 @@
   /* Estados Semafóricos de Descuentos */
   --color-exito: #10b981;
   --color-exito-suave: #d1fae5;
+  --azul-suave: #dbeafe;
   --color-alerta-amarillo: #f59e0b;
   --color-alerta-amarillo-suave: #fef3c7;
   --color-peligro-rojo: #ef4444;
@@ -50,6 +51,7 @@
   --fondo-base: #070d19;
   --fondo-tarjeta: #0e172a;
   --fondo-elevado: #16223b;
+  --azul-suave: rgba(37, 99, 235, 0.22);
   --fondo-hover: #1e2e4e;
   --borde-tarjeta: #1c2b48;
   --borde-suave: #273b61;
@@ -2968,6 +2970,30 @@ body {
   background: var(--fondo-elevado);
   color: var(--texto-atenuado);
   border: 1px solid var(--borde-tarjeta);
+}
+
+.selector-badge-azul {
+  background: rgba(37, 99, 235, 0.15);
+  color: #2563eb;
+  border: 1px solid rgba(37, 99, 235, 0.3);
+}
+
+[data-tema="oscuro"] .selector-badge-azul {
+  background: rgba(37, 99, 235, 0.25);
+  color: #60a5fa;
+  border: 1px solid rgba(37, 99, 235, 0.4);
+}
+
+.selector-badge-morado {
+  background: rgba(124, 58, 237, 0.15);
+  color: #7c3aed;
+  border: 1px solid rgba(124, 58, 237, 0.3);
+}
+
+[data-tema="oscuro"] .selector-badge-morado {
+  background: rgba(124, 58, 237, 0.25);
+  color: #a78bfa;
+  border: 1px solid rgba(124, 58, 237, 0.4);
 }
 
 .tabla-envoltorio {

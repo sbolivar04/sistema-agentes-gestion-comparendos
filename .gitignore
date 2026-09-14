@@ -48,6 +48,7 @@ playwright/.cache/
 # Node / Frontend
 node_modules/
 plataforma_web/cliente/node_modules/
+plataforma_web/cliente/dist/
 
 # Temporales y Scratch
 scratch/

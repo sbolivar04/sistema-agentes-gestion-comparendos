@@ -102,7 +102,7 @@ export function ModalDetalleComparendo({ comparendo, alCerrar }) {
     comparendo.fecha_notificacion === 'En proceso de notificación' ||
     comparendo.fecha_notificacion === 'N/A'
 
-  const esPagado = comparendo.estado_simit === 'Pagado' || comparendo.estado_simit !== 'Activo'
+  const esPagado = comparendo.estado_simit === 'No activo' || comparendo.estado_simit === 'Pagado'
 
   // Cálculo de intereses de mora (provistos por SIMIT o diferencia sobre el valor nominal)
   const interesesMora = Number(comparendo.intereses || 0) > 0
@@ -147,8 +147,8 @@ export function ModalDetalleComparendo({ comparendo, alCerrar }) {
                 Infracción {comparendo.codigo_infraccion || 'N/A'}
               </span>
 
-              <span className={`chip-estado ${comparendo.estado_simit === 'Activo' ? 'activo' : 'inactivo'}`}>
-                {comparendo.estado_simit === 'Activo' ? 'Activo' : 'Pagado'}
+              <span className={`chip-estado ${esPagado ? 'inactivo' : 'activo'}`}>
+                {esPagado ? 'Pagado' : 'Activo'}
               </span>
             </div>
           </div>
@@ -242,7 +242,7 @@ export function ModalDetalleComparendo({ comparendo, alCerrar }) {
                 <div className="modal-dato-fila">
                   <span className="etiqueta">Fecha de Infracción</span>
                   <span className="valor" style={{ fontWeight: 600 }}>
-                    {formatearFechaHora(comparendo.fecha_infraccion)}
+                    {formatearFechaHora(comparendo.fecha_infraccion) || (comparendo.fecha_descarga ? `Registrado: ${formatearFechaHora(comparendo.fecha_descarga)}` : 'Sin registrar')}
                   </span>
                 </div>
 

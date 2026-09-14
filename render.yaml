@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: comparendos-fscr
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /salud
+    envVars:
+      - key: DB_SCHEMA
+        value: comparendos_fscr
+      - key: MODELO_GEMINI
+        value: gemini-3.8-flash
+      - key: GITHUB_REPO
+        value: sbolivar04/sistema-agentes-gestion-comparendos
+      - key: DEPURACION
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false

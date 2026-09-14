@@ -24,6 +24,7 @@ import { BarraNavegacion } from '../componentes/BarraNavegacion'
 import { ChatAgenteIA } from '../componentes/ChatAgenteIA'
 import { EtiquetaTooltip } from '../componentes/EtiquetaTooltip'
 import { ModalConfirmacion } from '../componentes/ModalConfirmacion'
+import { SelectorDesplegable } from '../componentes/SelectorDesplegable'
 import { apiBackend } from '../servicios/apiBackend'
 import { useFlota } from '../contexto/ContextoFlota'
 
@@ -292,6 +293,7 @@ export function PaginaConfiguracion() {
   const totalPausadas = entidades.filter(e => !e.activo).length
   const totalNits = entidades.filter(e => e.tipo_documento === 'NIT').length
   const totalCedulas = entidades.filter(e => e.tipo_documento === 'Cédula').length
+  const totalAmbos = entidades.filter(e => e.tipo_documento === 'AMBOS').length
   const entidadesConAlerta = entidades.filter(e => e.requiere_desambiguacion || e.tipo_documento === 'Pendiente' || e.tipo_documento === 'Sin especificar')
 
   return (
@@ -489,14 +491,56 @@ export function PaginaConfiguracion() {
               </div>
             </div>
             <div className="tarjeta-kpi-valor">
-              {totalNits} <span className="tarjeta-kpi-subtexto">NITs</span>
+              {entidades.length} <span className="tarjeta-kpi-subtexto">a consultar</span>
             </div>
-            <div className="tarjeta-kpi-chips-fila">
-              <span className="chip-estado" style={{ background: 'var(--azul-suave)', color: 'var(--color-primario)' }}>
+            <div className="tarjeta-kpi-chips-fila" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'nowrap', width: '100%' }}>
+              <span 
+                className="chip-estado" 
+                style={{ 
+                  background: '#dbeafe', 
+                  color: '#1d4ed8',
+                  border: '1px solid #bfdbfe',
+                  padding: '0.15rem 0.35rem',
+                  fontSize: '0.69rem',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+                title="Entidades configuradas como NIT"
+              >
+                {totalNits} NITs
+              </span>
+              <span 
+                className="chip-estado" 
+                style={{ 
+                  background: '#dcfce7', 
+                  color: '#15803d',
+                  border: '1px solid #bbf7d0',
+                  padding: '0.15rem 0.35rem',
+                  fontSize: '0.69rem',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+                title="Entidades configuradas como Cédula de Ciudadanía"
+              >
                 {totalCedulas} Cédulas
               </span>
-              <span className="chip-estado" style={{ background: 'var(--fondo-elevado)', color: 'var(--texto-atenuado)' }}>
-                {entidades.length} Total
+              <span 
+                className="chip-estado" 
+                style={{ 
+                  background: '#ede9fe', 
+                  color: '#6d28d9',
+                  border: '1px solid #ddd6fe',
+                  padding: '0.15rem 0.35rem',
+                  fontSize: '0.69rem',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+                title="Entidades con consulta simultánea de NIT y Cédula en el SIMIT"
+              >
+                {totalAmbos} Ambos
               </span>
             </div>
           </div>
@@ -598,6 +642,21 @@ export function PaginaConfiguracion() {
                         >
                           Es Cédula
                         </button>
+                        <button 
+                          onClick={() => resolverTipoRapido(item.id, 'AMBOS')}
+                          className="boton-primario"
+                          style={{
+                            padding: '0.35rem 0.75rem',
+                            fontSize: '0.8rem',
+                            fontWeight: 700,
+                            borderRadius: 'var(--radio-sm)',
+                            backgroundColor: '#7c3aed',
+                            borderColor: '#6d28d9',
+                            color: '#ffffff'
+                          }}
+                        >
+                          Ambos (NIT y Cédula)
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -620,30 +679,72 @@ export function PaginaConfiguracion() {
                 value={busqueda}
                 onChange={(e) => setBusqueda(e.target.value)}
               />
+              {busqueda && (
+                <EtiquetaTooltip texto="Limpiar búsqueda">
+                  <button
+                    type="button"
+                    onClick={() => setBusqueda('')}
+                    className="buscador-limpiar"
+                    aria-label="Limpiar búsqueda"
+                  >
+                    <X size={16} />
+                  </button>
+                </EtiquetaTooltip>
+              )}
             </div>
 
-            {/* Filtros */}
+            {/* Filtros Corporativos Estandarizados */}
             <div className="filtros-contenedor">
-              <select 
-                className="select-filtro"
-                value={filtroEstado}
-                onChange={(e) => setFiltroEstado(e.target.value)}
-              >
-                <option value="todos">Todos los Estados</option>
-                <option value="activos">Solo Activos (En consulta)</option>
-                <option value="pausados">Pausados</option>
-              </select>
+              <SelectorDesplegable
+                valor={filtroEstado}
+                alCambiar={(nuevoEstado) => setFiltroEstado(nuevoEstado)}
+                opciones={[
+                  {
+                    valor: 'todos',
+                    etiqueta: 'Todos los Estados'
+                  },
+                  {
+                    valor: 'activos',
+                    etiqueta: 'Activos (En consulta)',
+                    colorIndicador: '#10b981'
+                  },
+                  {
+                    valor: 'pausados',
+                    etiqueta: 'Pausados',
+                    colorIndicador: '#94a3b8'
+                  }
+                ]}
+                anchoMinimo="175px"
+              />
 
-              <select 
-                className="select-filtro"
-                value={filtroTipo}
-                onChange={(e) => setFiltroTipo(e.target.value)}
-              >
-                <option value="todos">Todos los Tipos</option>
-                <option value="NIT">NIT (Empresas)</option>
-                <option value="Cédula">Cédula de Ciudadanía</option>
-                <option value="Pendiente">Pendiente de Definir</option>
-              </select>
+              <SelectorDesplegable
+                valor={filtroTipo}
+                alCambiar={(nuevoTipo) => setFiltroTipo(nuevoTipo)}
+                opciones={[
+                  {
+                    valor: 'todos',
+                    etiqueta: 'Todos los Tipos'
+                  },
+                  {
+                    valor: 'NIT',
+                    etiqueta: 'NIT (Empresas)'
+                  },
+                  {
+                    valor: 'Cédula',
+                    etiqueta: 'Cédula de Ciudadanía'
+                  },
+                  {
+                    valor: 'AMBOS',
+                    etiqueta: 'NIT y Cédula (Ambos)'
+                  },
+                  {
+                    valor: 'Pendiente',
+                    etiqueta: 'Pendiente por Definir'
+                  }
+                ]}
+                icono={Sliders}
+                anchoMinimo="200px"
+              />
             </div>
           </div>
 
@@ -652,7 +753,18 @@ export function PaginaConfiguracion() {
             <table className="tabla-datos">
               <thead>
                 <tr>
-                  <th>EMPRESA / TITULAR</th>
+                  <th style={{ textAlign: 'center' }}>
+                    <div style={{ 
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      width: '270px', 
+                      textAlign: 'left',
+                      paddingLeft: 'calc(16px + 0.65rem)',
+                      boxSizing: 'border-box'
+                    }}>
+                      EMPRESA / TITULAR
+                    </div>
+                  </th>
                   <th>N° IDENTIFICACIÓN</th>
                   <th>TIPO DE DOCUMENTO</th>
                   <th style={{ textAlign: 'center' }}>ESTADO DE CONSULTA</th>
@@ -683,31 +795,48 @@ export function PaginaConfiguracion() {
                         }}
                       >
                         {/* Nombre de la Entidad */}
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 600 }}>
-                            <Building2 size={16} style={{ color: 'var(--azul-primario)' }} />
-                            <span>{entidad.nombre_entidad}</span>
-                            {tieneAlerta && (
-                              <EtiquetaTooltip texto="Requiere definir si es NIT o Cédula en el SIMIT">
-                                <span 
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.25rem',
-                                    padding: '0.15rem 0.45rem',
-                                    borderRadius: 'var(--radio-sm)',
-                                    fontSize: '0.72rem',
-                                    fontWeight: 700,
-                                    backgroundColor: 'rgba(245, 158, 11, 0.2)',
-                                    color: '#b45309',
-                                    cursor: 'help'
-                                  }}
-                                >
-                                  <AlertTriangle size={12} />
-                                  Requiere Atención
-                                </span>
-                              </EtiquetaTooltip>
-                            )}
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ 
+                            display: 'inline-flex', 
+                            alignItems: 'center', 
+                            gap: '0.65rem', 
+                            width: '270px', 
+                            textAlign: 'left' 
+                          }}>
+                            <Building2 size={16} style={{ color: 'var(--azul-primario)', flexShrink: 0 }} />
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', minWidth: 0, alignItems: 'flex-start' }}>
+                              <span style={{ 
+                                fontWeight: 600, 
+                                color: 'var(--texto-principal)', 
+                                fontSize: '0.86rem',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
+                              }}>
+                                {entidad.nombre_entidad}
+                              </span>
+                              {tieneAlerta && (
+                                <EtiquetaTooltip texto="Requiere definir si es NIT o Cédula en el SIMIT">
+                                  <span 
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem',
+                                      padding: '0.15rem 0.45rem',
+                                      borderRadius: 'var(--radio-sm)',
+                                      fontSize: '0.72rem',
+                                      fontWeight: 700,
+                                      backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                                      color: '#b45309',
+                                      cursor: 'help'
+                                    }}
+                                  >
+                                    <AlertTriangle size={12} />
+                                    Requiere Atención
+                                  </span>
+                                </EtiquetaTooltip>
+                              )}
+                            </div>
                           </div>
                         </td>
 
@@ -726,10 +855,23 @@ export function PaginaConfiguracion() {
                             borderRadius: 'var(--radio-sm)',
                             fontSize: '0.8rem',
                             fontWeight: 700,
-                            backgroundColor: entidad.tipo_documento === 'NIT' ? 'var(--azul-suave)' : entidad.tipo_documento === 'Cédula' ? 'var(--color-exito-suave)' : 'var(--color-alerta-amarillo-suave)',
-                            color: entidad.tipo_documento === 'NIT' ? 'var(--color-primario)' : entidad.tipo_documento === 'Cédula' ? 'var(--color-exito)' : '#d97706'
+                            backgroundColor: entidad.tipo_documento === 'NIT' 
+                              ? 'var(--azul-suave)' 
+                              : entidad.tipo_documento === 'Cédula' 
+                              ? 'var(--color-exito-suave)' 
+                              : entidad.tipo_documento === 'AMBOS'
+                              ? '#ede9fe'
+                              : 'var(--color-alerta-amarillo-suave)',
+                            color: entidad.tipo_documento === 'NIT' 
+                              ? 'var(--color-primario)' 
+                              : entidad.tipo_documento === 'Cédula' 
+                              ? 'var(--color-exito)' 
+                              : entidad.tipo_documento === 'AMBOS'
+                              ? '#6d28d9'
+                              : '#d97706',
+                            border: entidad.tipo_documento === 'AMBOS' ? '1px solid #ddd6fe' : 'none'
                           }}>
-                            {entidad.tipo_documento || 'Sin especificar'}
+                            {entidad.tipo_documento === 'AMBOS' ? 'NIT + Cédula (Ambos)' : (entidad.tipo_documento || 'Sin especificar')}
                           </span>
                         </td>
 
@@ -761,7 +903,7 @@ export function PaginaConfiguracion() {
 
                         {/* Acciones */}
                         <td style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                             <EtiquetaTooltip texto="Editar datos de la entidad">
                               <button
                                 onClick={() => abrirModalEditar(entidad)}
@@ -769,16 +911,6 @@ export function PaginaConfiguracion() {
                                 style={{ width: '32px', height: '32px' }}
                               >
                                 <Edit2 size={14} />
-                              </button>
-                            </EtiquetaTooltip>
-                            
-                            <EtiquetaTooltip texto="Eliminar entidad">
-                              <button
-                                onClick={() => solicitarEliminarEntidad(entidad)}
-                                className="boton-icono"
-                                style={{ width: '32px', height: '32px', color: 'var(--color-peligro-rojo)', background: 'var(--color-peligro-rojo-suave)', borderColor: '#fca5a5' }}
-                              >
-                                <Trash2 size={14} />
                               </button>
                             </EtiquetaTooltip>
                           </div>
@@ -910,21 +1042,37 @@ export function PaginaConfiguracion() {
 
               {/* Tipo de Documento */}
               <div style={{ marginBottom: '1.25rem' }}>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--texto-principal)' }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.45rem', color: 'var(--texto-principal)' }}>
                   Tipo de Documento para SIMIT *
                 </label>
-                <select
-                  value={entidadFormulario.tipo_documento}
-                  onChange={(e) => setEntidadFormulario({ ...entidadFormulario, tipo_documento: e.target.value })}
-                  className="select-filtro"
-                  style={{ width: '100%' }}
-                >
-                  <option value="NIT">NIT (Persona Jurídica / Empresa)</option>
-                  <option value="Cédula">Cédula de Ciudadanía (Persona Natural)</option>
-                  <option value="Pendiente">Pendiente por definir</option>
-                </select>
-                <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.75rem', color: 'var(--texto-atenuado)' }}>
-                  El agente usará este tipo cuando el SIMIT pregunte si es NIT o Cédula.
+                <SelectorDesplegable
+                  valor={entidadFormulario.tipo_documento}
+                  alCambiar={(nuevoTipo) => setEntidadFormulario({ ...entidadFormulario, tipo_documento: nuevoTipo })}
+                  opciones={[
+                    {
+                      valor: 'NIT',
+                      etiqueta: 'NIT (Persona Jurídica / Empresa)'
+                    },
+                    {
+                      valor: 'Cédula',
+                      etiqueta: 'Cédula de Ciudadanía (Persona Natural)'
+                    },
+                    {
+                      valor: 'AMBOS',
+                      etiqueta: 'Ambos (Consultar como NIT y Cédula)'
+                    },
+                    {
+                      valor: 'Pendiente',
+                      etiqueta: 'Pendiente por definir'
+                    }
+                  ]}
+                  icono={FileText}
+                  anchoMinimo="100%"
+                />
+                <p style={{ margin: '0.45rem 0 0 0', fontSize: '0.75rem', color: 'var(--texto-atenuado)', lineHeight: 1.4 }}>
+                  {entidadFormulario.tipo_documento === 'AMBOS' 
+                    ? 'El agente consultará secuencialmente tanto NIT como Cédula en SIMIT y unificará todos los comparendos.' 
+                    : 'El agente usará este tipo cuando el SIMIT pregunte si es NIT o Cédula.'}
                 </p>
               </div>
 

@@ -31,7 +31,8 @@ export function SelectorDesplegable({
   direccion = 'abajo',
   tamano = 'normal',
   deshabilitado = false,
-  className = ''
+  className = '',
+  style = {}
 }) {
   const [estaAbierto, setEstaAbierto] = useState(false)
   const [estiloPosicion, setEstiloPosicion] = useState({})
@@ -161,7 +162,12 @@ export function SelectorDesplegable({
     <div
       className={`selector-desplegable-contenedor ${estaAbierto ? 'abierto' : ''} ${tamano === 'compacto' ? 'compacto' : ''} ${className} ${deshabilitado ? 'deshabilitado' : ''}`}
       ref={referenciaContenedor}
-      style={{ minWidth: anchoMinimo }}
+      style={{ 
+        minWidth: anchoMinimo,
+        width: anchoMinimo === '100%' ? '100%' : undefined,
+        display: anchoMinimo === '100%' ? 'block' : 'inline-block',
+        ...style 
+      }}
     >
       <button
         type="button"

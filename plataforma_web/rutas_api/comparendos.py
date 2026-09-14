@@ -7,6 +7,57 @@ from base_datos.modelos import ComparendoORM
 
 enrutador_comparendos = APIRouter(prefix="/api/comparendos", tags=["Comparendos"])
 
+def serializar_comparendo(c: ComparendoORM) -> Dict[str, Any]:
+    """
+    Serializa un registro ORM de comparendo con todos los campos canónicos requeridos
+    por la plataforma web (tabla, modales emergentes y notificaciones).
+    """
+    if c.aplica_descuento_50:
+        if c.fecha_limite_descuento_50:
+            tag_desc = "50% Vigente"
+            fecha_lim = str(c.fecha_limite_descuento_50)
+        else:
+            tag_desc = "50% (Sin Notificar)"
+            fecha_lim = "Pendiente Notificación"
+        val_pagar = c.valor_con_descuento_50
+    elif c.aplica_descuento_25:
+        if c.fecha_limite_descuento_25:
+            tag_desc = "25% Vigente"
+            fecha_lim = str(c.fecha_limite_descuento_25)
+        else:
+            tag_desc = "25% Vigente"
+            fecha_lim = "Pendiente Notificación"
+        val_pagar = c.valor_con_descuento_25
+    else:
+        tag_desc = "Sin Descuento"
+        fecha_lim = "Vencido"
+        val_pagar = c.valor_total
+
+    return {
+        "id": c.id,
+        "numero_comparendo": c.numero_comparendo,
+        "numero_resolucion": c.numero_resolucion,
+        "placa": c.placa,
+        "criterio_busqueda": c.criterio_busqueda,
+        "tipo_registro": c.tipo_registro,
+        "codigo_infraccion": c.codigo_infraccion,
+        "descripcion_infraccion": c.descripcion_infraccion,
+        "secretaria": c.secretaria,
+        "direccion": c.direccion,
+        "fecha_infraccion": c.fecha_infraccion.strftime("%Y-%m-%d %H:%M") if c.fecha_infraccion else "N/A",
+        "fecha_notificacion": c.fecha_notificacion.strftime("%Y-%m-%d") if c.fecha_notificacion else "En proceso de notificación",
+        "fecha_resolucion": c.fecha_resolucion.strftime("%Y-%m-%d") if c.fecha_resolucion else None,
+        "valor_nominal": round(float(c.valor)) if c.valor else 0,
+        "intereses": round(float(c.intereses)) if c.intereses else 0,
+        "valor_total": round(float(c.valor_total)) if c.valor_total else 0,
+        "etiqueta_descuento": tag_desc,
+        "fecha_limite_descuento": fecha_lim,
+        "valor_a_pagar": round(float(val_pagar)) if val_pagar else 0,
+        "ahorro_disponible": round(float(c.valor_total - val_pagar)) if (val_pagar and c.valor_total) else 0,
+        "estado_simit": c.estado_simit
+    }
+
+
 @enrutador_comparendos.get("")
 def listar_comparendos(
     pagina: int = Query(1, ge=1, description="Número de página (inicia en 1)"),
@@ -67,53 +118,7 @@ def listar_comparendos(
 
             registros = sesion.scalars(consulta).all()
 
-            lista = []
-            for c in registros:
-                # Determinar etiqueta de descuento y fecha límite legal
-                if c.aplica_descuento_50:
-                    if c.fecha_limite_descuento_50:
-                        tag_desc = "50% Vigente"
-                        fecha_lim = str(c.fecha_limite_descuento_50)
-                    else:
-                        tag_desc = "50% (Sin Notificar)"
-                        fecha_lim = "Pendiente Notificación"
-                    val_pagar = c.valor_con_descuento_50
-                elif c.aplica_descuento_25:
-                    if c.fecha_limite_descuento_25:
-                        tag_desc = "25% Vigente"
-                        fecha_lim = str(c.fecha_limite_descuento_25)
-                    else:
-                        tag_desc = "25% Vigente"
-                        fecha_lim = "Pendiente Notificación"
-                    val_pagar = c.valor_con_descuento_25
-                else:
-                    tag_desc = "Sin Descuento"
-                    fecha_lim = "Vencido"
-                    val_pagar = c.valor_total
-
-                lista.append({
-                    "id": c.id,
-                    "numero_comparendo": c.numero_comparendo,
-                    "numero_resolucion": c.numero_resolucion,
-                    "placa": c.placa,
-                    "criterio_busqueda": c.criterio_busqueda,
-                    "tipo_registro": c.tipo_registro,
-                    "codigo_infraccion": c.codigo_infraccion,
-                    "descripcion_infraccion": c.descripcion_infraccion,
-                    "secretaria": c.secretaria,
-                    "direccion": c.direccion,
-                    "fecha_infraccion": c.fecha_infraccion.strftime("%Y-%m-%d %H:%M") if c.fecha_infraccion else "N/A",
-                    "fecha_notificacion": c.fecha_notificacion.strftime("%Y-%m-%d") if c.fecha_notificacion else "En proceso de notificación",
-                    "fecha_resolucion": c.fecha_resolucion.strftime("%Y-%m-%d") if c.fecha_resolucion else None,
-                    "valor_nominal": round(float(c.valor)) if c.valor else 0,
-                    "intereses": round(float(c.intereses)) if c.intereses else 0,
-                    "valor_total": round(float(c.valor_total)) if c.valor_total else 0,
-                    "etiqueta_descuento": tag_desc,
-                    "fecha_limite_descuento": fecha_lim,
-                    "valor_a_pagar": round(float(val_pagar)) if val_pagar else 0,
-                    "ahorro_disponible": round(float(c.valor_total - val_pagar)) if (val_pagar and c.valor_total) else 0,
-                    "estado_simit": c.estado_simit
-                })
+            lista = [serializar_comparendo(c) for c in registros]
 
             total_paginas = (total_registros + limite - 1) // limite if total_registros > 0 else 1
 

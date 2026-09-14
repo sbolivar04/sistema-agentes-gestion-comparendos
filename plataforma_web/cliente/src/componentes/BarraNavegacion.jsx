@@ -174,15 +174,21 @@ export function BarraNavegacion({
         id: 'demo-urgente-1',
         placa: 'WBC123',
         numero_comparendo: '08001000000034567891',
+        numero_resolucion: '08001000000034567891',
         codigo_infraccion: 'C02',
         secretaria: 'Tránsito Barranquilla',
         nivel_alerta: 'ROJO',
         tipo_descuento: '50%',
+        fecha_infraccion: '2026-08-25 10:15',
+        fecha_notificacion: '2026-08-27',
         fecha_limite: '2026-09-05',
         dias_habiles_restantes: 2,
         valor_nominal: 650000,
+        valor_total: 650000,
         valor_a_pagar: 325000,
         ahorro_en_juego: 325000,
+        ahorro_disponible: 325000,
+        etiqueta_descuento: '50% Vigente',
         estado_simit: 'Activo',
         direccion: 'Calle 72 con Cra 43',
         descripcion_infraccion: 'Estacionar un vehículo en sitios prohibidos'
@@ -191,15 +197,21 @@ export function BarraNavegacion({
         id: 'demo-precaucion-2',
         placa: 'XYZ789',
         numero_comparendo: '11001000000098765432',
+        numero_resolucion: '11001000000098765432',
         codigo_infraccion: 'C29',
         secretaria: 'Movilidad Bogotá',
         nivel_alerta: 'AMARILLO',
         tipo_descuento: '50%',
+        fecha_infraccion: '2026-08-28 15:40',
+        fecha_notificacion: '2026-08-30',
         fecha_limite: '2026-09-10',
         dias_habiles_restantes: 6,
         valor_nominal: 580000,
+        valor_total: 580000,
         valor_a_pagar: 290000,
         ahorro_en_juego: 290000,
+        ahorro_disponible: 290000,
+        etiqueta_descuento: '50% Vigente',
         estado_simit: 'Activo',
         direccion: 'Autopista Norte Cl 127',
         descripcion_infraccion: 'Conducir a velocidad superior a la máxima permitida'
@@ -208,15 +220,21 @@ export function BarraNavegacion({
         id: 'demo-vigente-3',
         placa: 'KLR982',
         numero_comparendo: '47001000000012345678',
+        numero_resolucion: 'Sin resolución emitida',
         codigo_infraccion: 'C35',
         secretaria: 'Tránsito Santa Marta',
         nivel_alerta: 'VERDE',
         tipo_descuento: '25%',
+        fecha_infraccion: '2026-09-01 09:20',
+        fecha_notificacion: '2026-09-03',
         fecha_limite: '2026-09-22',
         dias_habiles_restantes: 12,
         valor_nominal: 633000,
+        valor_total: 633000,
         valor_a_pagar: 474750,
         ahorro_en_juego: 158250,
+        ahorro_disponible: 158250,
+        etiqueta_descuento: '25% Vigente',
         estado_simit: 'Activo',
         direccion: 'Av. Libertador Cra 19',
         descripcion_infraccion: 'No realizar la revisión técnico-mecánica'
@@ -227,10 +245,17 @@ export function BarraNavegacion({
         id: 'demo-nuevo-4',
         placa: 'TRK456',
         numero_comparendo: '05001000000055443322',
+        numero_resolucion: 'Sin resolución emitida',
         codigo_infraccion: 'D02',
         secretaria: 'Tránsito Medellín',
+        fecha_infraccion: '2026-09-02 08:30',
+        fecha_notificacion: 'En proceso de notificación',
         fecha_descarga: '2026-09-02 14:30',
+        valor_nominal: 1300000,
         valor_total: 1300000,
+        valor_a_pagar: 1300000,
+        ahorro_disponible: 0,
+        etiqueta_descuento: 'Sin Descuento',
         estado_simit: 'Activo',
         direccion: 'Cra 65 con Cl 80',
         descripcion_infraccion: 'Conducir sin portar los seguros ordenados por la ley'
@@ -241,9 +266,16 @@ export function BarraNavegacion({
         id: 'demo-pagado-5',
         placa: 'MNO654',
         numero_comparendo: '08001000000077889900',
+        numero_resolucion: '08001000000077889900',
         codigo_infraccion: 'C14',
         secretaria: 'Tránsito Puerto Colombia',
+        fecha_infraccion: '2026-08-10 11:20',
+        fecha_notificacion: '2026-08-12',
+        valor_nominal: 650000,
         valor_total: 650000,
+        valor_a_pagar: 650000,
+        ahorro_disponible: 0,
+        etiqueta_descuento: 'Paz y Salvo',
         estado_simit: 'No activo',
         fecha_actualizacion: '2026-09-02',
         direccion: 'Vía al Mar Km 7',
@@ -285,14 +317,40 @@ export function BarraNavegacion({
     ? (SYNC_CASOS[escenarioPrueba] || [])
     : (alertas.notificaciones_sincronizacion || [])
 
-  // Lista de todas las claves únicas para cálculo de pendientes
+  // Clave dinámica para alertas de vencimiento sensible al conteo regresivo de días hábiles restantes.
+  // Permite que cuando cambien los días (ej. de 4 días ayer a 3 días hoy), la notificación vuelva a aparecer
+  // como NO LEÍDA automáticamente, garantizando que el usuario se entere de la actualización diaria.
+  const obtenerClaveVencimiento = (v) => {
+    const dias = v.dias_habiles_restantes !== undefined ? v.dias_habiles_restantes : ''
+    const tipo = v.tipo_descuento || ''
+    return `venc-${v.id || v.numero_comparendo}-${tipo}-${dias}d`
+  }
+
+  // Lista de todas las claves únicas activas para cálculo de pendientes
   const todasLasClaves = [
-    ...alertasVencimiento.map(a => `venc-${a.id}`),
+    ...alertasVencimiento.map(a => obtenerClaveVencimiento(a)),
     ...comparendosNuevos.map(n => `nuevo-${n.id}`),
     ...comparendosPagados.map(p => `pagado-${p.id}`),
     ...alertasConfig.map(c => `config-${c.id}`),
     ...alertasSync.map(s => `sync-${s.id}`)
   ]
+
+  // Limpieza automática de notificaciones leídas de vencimiento correspondientes a días anteriores
+  useEffect(() => {
+    setLeidas((prev) => {
+      const clavesValidas = prev.filter((c) => {
+        if (!c.startsWith('venc-')) return true
+        return todasLasClaves.includes(c)
+      })
+      if (clavesValidas.length !== prev.length) {
+        try {
+          localStorage.setItem('fscr_notificaciones_leidas', JSON.stringify(clavesValidas))
+        } catch (e) {}
+        return clavesValidas
+      }
+      return prev
+    })
+  }, [todasLasClaves.join(',')])
 
   const marcarTodasComoLeidas = () => {
     const conjuntoActualizado = Array.from(new Set([...leidas, ...todasLasClaves]))
@@ -312,7 +370,7 @@ export function BarraNavegacion({
     (a) => a.nivel_alerta === 'ROJO' || (a.dias_habiles_restantes !== undefined && a.dias_habiles_restantes <= 4)
   )
   const syncErrores = alertasSync.filter(s => s.es_error)
-  const urgentesNoLeidas = listaUrgentes.filter(a => !leidas.includes(`venc-${a.id}`)).length
+  const urgentesNoLeidas = listaUrgentes.filter(a => !leidas.includes(obtenerClaveVencimiento(a))).length
   const syncErroresNoLeidos = syncErrores.filter(s => !leidas.includes(`sync-${s.id}`)).length
   const tieneUrgentes = urgentesNoLeidas > 0 || syncErroresNoLeidos > 0
 
@@ -335,7 +393,7 @@ export function BarraNavegacion({
     tipo: 'sync',
     esLeida: leidas.includes(`sync-${s.id}`),
     esUrgente: Boolean(s.es_error),
-    ordenCategoria: 1,
+    ordenCategoria: s.es_error ? 0 : 1,
     datos: s
   }))
 
@@ -360,16 +418,17 @@ export function BarraNavegacion({
   }))
 
   const itemsVenc = alertasVencimiento.map(v => {
+    const clave = obtenerClaveVencimiento(v)
     const esUrgente = v.nivel_alerta === 'ROJO' || (v.dias_habiles_restantes !== undefined && v.dias_habiles_restantes <= 4)
     const esPrecaucion = v.nivel_alerta === 'AMARILLO' || (v.dias_habiles_restantes > 4 && v.dias_habiles_restantes <= 8)
     const prioridadVenc = esUrgente ? 1 : (esPrecaucion ? 2 : 3)
     return {
-      id: `venc-${v.id}`,
-      clave: `venc-${v.id}`,
+      id: clave,
+      clave,
       tipo: 'vencimiento',
-      esLeida: leidas.includes(`venc-${v.id}`),
+      esLeida: leidas.includes(clave),
       esUrgente,
-      ordenCategoria: 4,
+      ordenCategoria: esUrgente ? 0 : 4,
       prioridadInterna: prioridadVenc,
       datos: v
     }
@@ -393,105 +452,61 @@ export function BarraNavegacion({
     ...itemsConfig
   ]
 
-  // Sincronización y mantenimiento del orden persistente:
-  // 1. Las no leídas se colocan de primero y se organizan por tipo de notificación.
-  // 2. Las leídas se preservan en su posición y NUNCA se reorganizan.
-  // 3. Al marcar como leída, la notificación permanece fija en su posición sin moverse jamás.
+  // Limpiar cualquier orden antiguo congelado en localStorage
   useEffect(() => {
-    if (todasLasClaves.length === 0) return
+    try {
+      localStorage.removeItem('fscr_notificaciones_orden')
+    } catch (e) {}
+  }, [])
 
-    setOrdenClaves((prevOrden) => {
-      const clavesValidas = (prevOrden || []).filter((c) => todasLasClaves.includes(c))
-      const nuevasClaves = todasLasClaves.filter((c) => !clavesValidas.includes(c))
+  // Ordenamiento prioritario estricto:
+  // 1. Notificaciones NO LEÍDAS siempre van de primero antes que las leídas.
+  // 2. Entre las NO LEÍDAS, las URGENTES van SIEMPRE de primero (vencimiento <= 4 días, fallos de sync).
+  // 3. Entre urgentes de vencimiento, la que tenga menos días restantes va primero.
+  // 4. Si una notificación urgente ya fue LEÍDA, pasa a la sección de leídas y nunca aparece antes de las no leídas.
+  const listaOrdenada = [...todasLasNotificaciones].sort((a, b) => {
+    const noLeidaA = !leidas.includes(a.clave)
+    const noLeidaB = !leidas.includes(b.clave)
 
-      // Inicialización o si no hay orden previo
-      if (clavesValidas.length === 0) {
-        const noLeidasOrdenadas = todasLasNotificaciones
-          .filter((n) => !leidas.includes(n.clave))
-          .sort((a, b) => {
-            if (a.ordenCategoria !== b.ordenCategoria) {
-              return a.ordenCategoria - b.ordenCategoria
-            }
-            if (a.tipo === 'vencimiento' && b.tipo === 'vencimiento') {
-              return (a.prioridadInterna || 3) - (b.prioridadInterna || 3)
-            }
-            return 0
-          })
-          .map((n) => n.clave)
+    // 1. No leídas antes que leídas
+    if (noLeidaA !== noLeidaB) {
+      return noLeidaA ? -1 : 1
+    }
 
-        const leidasOrdenadas = todasLasNotificaciones
-          .filter((n) => leidas.includes(n.clave))
-          .sort((a, b) => a.ordenCategoria - b.ordenCategoria)
-          .map((n) => n.clave)
+    const urgenteA = Boolean(a.esUrgente)
+    const urgenteB = Boolean(b.esUrgente)
 
-        const nuevoOrden = [...noLeidasOrdenadas, ...leidasOrdenadas]
-        try {
-          localStorage.setItem('fscr_notificaciones_orden', JSON.stringify(nuevoOrden))
-        } catch (e) {}
-        return nuevoOrden
+    // 2. Entre no leídas: las URGENTES siempre van de primero
+    if (noLeidaA && noLeidaB) {
+      if (urgenteA !== urgenteB) {
+        return urgenteA ? -1 : 1
       }
-
-      // Si llegaron nuevas alertas desde backend:
-      if (nuevasClaves.length > 0) {
-        const nuevasNoLeidas = todasLasNotificaciones
-          .filter((n) => nuevasClaves.includes(n.clave) && !leidas.includes(n.clave))
-          .sort((a, b) => {
-            if (a.ordenCategoria !== b.ordenCategoria) {
-              return a.ordenCategoria - b.ordenCategoria
-            }
-            if (a.tipo === 'vencimiento' && b.tipo === 'vencimiento') {
-              return (a.prioridadInterna || 3) - (b.prioridadInterna || 3)
-            }
-            return 0
-          })
-          .map((n) => n.clave)
-
-        const nuevasLeidas = nuevasClaves.filter((c) => !nuevasNoLeidas.includes(c))
-        const nuevoOrden = [...nuevasNoLeidas, ...clavesValidas, ...nuevasLeidas]
-        try {
-          localStorage.setItem('fscr_notificaciones_orden', JSON.stringify(nuevoOrden))
-        } catch (e) {}
-        return nuevoOrden
+      // Entre urgentes de vencimiento, la que esté más próxima a vencer (menos días) va primero
+      if (a.tipo === 'vencimiento' && b.tipo === 'vencimiento') {
+        const diasA = a.datos?.dias_habiles_restantes ?? 999
+        const diasB = b.datos?.dias_habiles_restantes ?? 999
+        if (diasA !== diasB) return diasA - diasB
       }
-
-      // Si se eliminó alguna clave
-      if (clavesValidas.length !== (prevOrden || []).length) {
-        try {
-          localStorage.setItem('fscr_notificaciones_orden', JSON.stringify(clavesValidas))
-        } catch (e) {}
-        return clavesValidas
+      if (a.ordenCategoria !== b.ordenCategoria) {
+        return a.ordenCategoria - b.ordenCategoria
       }
+      return 0
+    }
 
-      return prevOrden
-    })
-  }, [todasLasClaves.join(','), escenarioPrueba])
-
-  // Mapeo indexado por clave
-  const mapaPorClave = new Map(todasLasNotificaciones.map(n => [n.clave, n]))
-
-  // Determinar claves en orden respetando ordenClaves
-  const clavesAUsar = (ordenClaves && ordenClaves.length > 0)
-    ? [
-        ...ordenClaves.filter(c => mapaPorClave.has(c)),
-        ...todasLasClaves.filter(c => !ordenClaves.includes(c))
-      ]
-    : [
-        // Orden inicial determinista: no leídas arriba por categoría, luego leídas
-        ...todasLasNotificaciones
-          .filter(n => !leidas.includes(n.clave))
-          .sort((a, b) => {
-            if (a.ordenCategoria !== b.ordenCategoria) return a.ordenCategoria - b.ordenCategoria
-            if (a.tipo === 'vencimiento' && b.tipo === 'vencimiento') return (a.prioridadInterna || 3) - (b.prioridadInterna || 3)
-            return 0
-          })
-          .map(n => n.clave),
-        ...todasLasNotificaciones
-          .filter(n => leidas.includes(n.clave))
-          .sort((a, b) => a.ordenCategoria - b.ordenCategoria)
-          .map(n => n.clave)
-      ]
-
-  const listaOrdenada = clavesAUsar.map(c => mapaPorClave.get(c)).filter(Boolean)
+    // 3. Entre leídas: urgentes leídas antes que normales leídas
+    if (urgenteA !== urgenteB) {
+      return urgenteA ? -1 : 1
+    }
+    if (a.tipo === 'vencimiento' && b.tipo === 'vencimiento') {
+      const diasA = a.datos?.dias_habiles_restantes ?? 999
+      const diasB = b.datos?.dias_habiles_restantes ?? 999
+      if (diasA !== diasB) return diasA - diasB
+    }
+    if (a.ordenCategoria !== b.ordenCategoria) {
+      return a.ordenCategoria - b.ordenCategoria
+    }
+    return 0
+  })
 
   // Filtrado por pestaña activa ('todas' o 'urgentes')
   const notificacionesFiltradas = listaOrdenada.filter(item => {
@@ -807,7 +822,7 @@ export function BarraNavegacion({
                                   soloEnPuntos
                                 >
                                   <span className="notif-c-detalle">
-                                    {alerta.secretaria || 'SIMIT'} • Vence el ${alerta.fecha_limite}
+                                    {alerta.secretaria || 'SIMIT'} • Vence el {alerta.fecha_limite}
                                   </span>
                                 </EtiquetaTooltip>
                                 <span 

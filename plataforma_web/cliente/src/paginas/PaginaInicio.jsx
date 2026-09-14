@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { apiBackend } from '../servicios/apiBackend'
 import { BarraNavegacion } from '../componentes/BarraNavegacion'
 import { TarjetasKPI } from '../componentes/TarjetasKPI'
 import { TablaComparendos } from '../componentes/TablaComparendos'
@@ -333,39 +334,94 @@ export function PaginaInicio({ alNavegarAConfiguracion }) {
     return () => clearInterval(timer)
   }, [listaAlertasEfectiva.length, modoDemoBanner])
 
-  // Abrir ventana emergente con el detalle de la infracción de inmediato, sin filtrar la tabla ni hacer peticiones innecesarias
-  const manejarAbrirDetalleComparendo = (item) => {
+  // Abrir ventana emergente con el detalle completo de la infracción de inmediato, sin filtrar la tabla ni animaciones invasivas
+  const manejarAbrirDetalleComparendo = async (item) => {
+    if (!item) return
+
     const placa = item?.placa || (typeof item === 'string' ? item : '')
     const numeroComparendo = item?.numero_comparendo || ''
-    if (!placa && !numeroComparendo) return
+    const id = item?.id
 
-    // Si ya es un objeto completo con detalles (desde la tabla o modal), usarlo directamente
-    if (item && typeof item === 'object' && item.numero_comparendo && item.secretaria) {
+    if (!placa && !numeroComparendo && !id) return
+
+    // 1. Buscar primero en la lista de comparendos cargados en la memoria global (los mismos datos completos de la tabla)
+    const encontradoEnMemoria = comparendos.find(c =>
+      (numeroComparendo && String(c.numero_comparendo).trim() === String(numeroComparendo).trim()) ||
+      (id && c.id === id) ||
+      (placa && c.placa === placa && (!numeroComparendo || String(c.numero_comparendo).trim() === String(numeroComparendo).trim()))
+    )
+
+    // Si está en la lista en memoria y cuenta con fecha de infracción oficial, lo usamos directamente
+    if (encontradoEnMemoria && encontradoEnMemoria.fecha_infraccion) {
+      setComparendoModal({
+        ...encontradoEnMemoria,
+        ...(typeof item === 'object' ? item : {}),
+        // Prevalecen los datos oficiales del comparendo de la tabla
+        fecha_infraccion: encontradoEnMemoria.fecha_infraccion,
+        fecha_notificacion: encontradoEnMemoria.fecha_notificacion,
+        fecha_resolucion: encontradoEnMemoria.fecha_resolucion,
+        numero_resolucion: encontradoEnMemoria.numero_resolucion,
+        direccion: encontradoEnMemoria.direccion || encontradoEnMemoria.secretaria,
+        estado_simit: encontradoEnMemoria.estado_simit || 'Activo',
+        valor_nominal: encontradoEnMemoria.valor_nominal || encontradoEnMemoria.valor_total,
+        valor_total: encontradoEnMemoria.valor_total,
+        valor_a_pagar: encontradoEnMemoria.valor_a_pagar,
+        ahorro_disponible: encontradoEnMemoria.ahorro_disponible,
+        etiqueta_descuento: encontradoEnMemoria.etiqueta_descuento,
+        fecha_limite_descuento: encontradoEnMemoria.fecha_limite_descuento
+      })
+      return
+    }
+
+    // 2. Si el objeto que recibimos ya viene 100% completo (gracias al enriquecimiento del backend)
+    if (item && typeof item === 'object' && item.fecha_infraccion && item.estado_simit && item.numero_resolucion !== undefined) {
       setComparendoModal(item)
       return
     }
 
-    // Buscar en la lista de comparendos en memoria global (cero llamadas de red)
-    const encontrado = comparendos.find(c =>
-      (numeroComparendo && c.numero_comparendo === numeroComparendo) ||
-      (placa && c.placa === placa)
-    )
+    // 3. Fallback inicial inmediato: abrir modal al instante con los datos disponibles sin retardos visuales
+    const baseInicial = typeof item === 'object' ? {
+      ...item,
+      placa: placa || item.placa,
+      numero_comparendo: numeroComparendo || item.numero_comparendo,
+      estado_simit: item.estado_simit || (item.fecha_actualizacion ? 'No activo' : 'Activo'),
+      valor_nominal: item.valor_nominal || item.valor_total || 0,
+      valor_total: item.valor_total || item.valor_nominal || 0,
+      valor_a_pagar: item.valor_a_pagar || (item.valor_con_descuento ? item.valor_con_descuento : (item.valor_total || 0)),
+      ahorro_disponible: item.ahorro_en_juego || (item.valor_total && item.valor_con_descuento ? item.valor_total - item.valor_con_descuento : 0),
+      etiqueta_descuento: item.tipo_descuento ? `${item.tipo_descuento} Vigente` : (item.etiqueta_descuento || 'Sin Descuento'),
+      fecha_limite_descuento: item.fecha_limite_descuento || item.fecha_limite || ''
+    } : { placa }
 
-    if (encontrado) {
-      setComparendoModal(encontrado)
-      return
-    }
+    setComparendoModal(baseInicial)
 
-    // Si viene desde una alerta básica sin todos los campos, usar los datos que tenga
-    if (item && typeof item === 'object') {
-      setComparendoModal({
-        ...item,
-        valor_nominal: item.valor_nominal || item.valor_total || 0,
-        valor_a_pagar: item.valor_a_pagar || item.valor_total || 0,
-        ahorro_disponible: item.ahorro_en_juego || item.ahorro_disponible || 0,
-        etiqueta_descuento: item.tipo_descuento ? `Desc. ${item.tipo_descuento}` : (item.etiqueta_descuento || ''),
-        estado_simit: item.estado_simit || (item.fecha_actualizacion ? 'No activo' : 'Activo')
-      })
+    // 4. Enriquecimiento silencioso en segundo plano si faltara algún campo y no estuviera en memoria
+    if (numeroComparendo || placa) {
+      try {
+        const res = await apiBackend.obtenerComparendos({
+          busqueda: numeroComparendo || placa,
+          limite: 10,
+          estado_simit: 'todos'
+        })
+        if (res && res.exitoso && Array.isArray(res.comparendos)) {
+          const comparendoExacto = res.comparendos.find(c =>
+            (numeroComparendo && String(c.numero_comparendo).trim() === String(numeroComparendo).trim()) ||
+            (id && c.id === id) ||
+            (placa && c.placa === placa)
+          )
+          if (comparendoExacto) {
+            setComparendoModal(prev => {
+              if (!prev) return null
+              if (prev.numero_comparendo === comparendoExacto.numero_comparendo || prev.placa === comparendoExacto.placa) {
+                return comparendoExacto
+              }
+              return prev
+            })
+          }
+        }
+      } catch (e) {
+        console.warn('No se pudo enriquecer el comparendo:', e)
+      }
     }
   }
 

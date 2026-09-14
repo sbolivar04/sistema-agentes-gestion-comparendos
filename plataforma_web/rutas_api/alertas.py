@@ -7,6 +7,7 @@ from configuracion import formatear_fecha_colombia, obtener_ahora_colombia, ZONA
 from base_datos.conexion import obtener_sesion_bd
 from base_datos.modelos import ComparendoORM, LogExtraccionORM
 from agente_extraccion_simit.festivos_colombia import contar_dias_habiles
+from plataforma_web.rutas_api.comparendos import serializar_comparendo
 
 enrutador_alertas = APIRouter(prefix="/api/alertas", tags=["Alertas"])
 
@@ -37,13 +38,8 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
 
             comparendos_nuevos = [
                 {
-                    "id": c.id,
-                    "placa": c.placa,
-                    "numero_comparendo": c.numero_comparendo,
-                    "codigo_infraccion": c.codigo_infraccion,
-                    "secretaria": c.secretaria,
+                    **serializar_comparendo(c),
                     "fecha_descarga": c.fecha_creacion_registro.strftime("%Y-%m-%d %H:%M") if c.fecha_creacion_registro else None,
-                    "valor_total": round(float(c.valor_total)) if c.valor_total else 0,
                     "tipo_descuento": "50%" if c.aplica_descuento_50 else ("25%" if c.aplica_descuento_25 else None),
                     "valor_con_descuento": round(float(c.valor_con_descuento_50 if c.aplica_descuento_50 else (c.valor_con_descuento_25 if c.aplica_descuento_25 else c.valor_total))) if (c.aplica_descuento_50 or c.aplica_descuento_25) else None,
                     "fecha_limite_descuento": str(c.fecha_limite_descuento_50 if c.aplica_descuento_50 else c.fecha_limite_descuento_25) if ((c.aplica_descuento_50 and c.fecha_limite_descuento_50) or (c.aplica_descuento_25 and c.fecha_limite_descuento_25)) else None
@@ -113,9 +109,7 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                             mensaje_urgencia = f"Vigente 25%: {dias_habiles_restantes} días hábiles"
 
                     alertas_vencimiento.append({
-                        "id": c.id,
-                        "placa": c.placa,
-                        "numero_comparendo": c.numero_comparendo,
+                        **serializar_comparendo(c),
                         "tipo_descuento": tipo_desc,
                         "fecha_limite": str(fecha_limite),
                         "dias_habiles_restantes": dias_habiles_restantes,
@@ -124,10 +118,7 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                         "color": color,
                         "icono": icono,
                         "mensaje_urgencia": mensaje_urgencia,
-                        "valor_nominal": round(float(c.valor_total)) if c.valor_total else 0,
-                        "valor_a_pagar": round(float(c.valor_con_descuento_50 if c.aplica_descuento_50 else c.valor_con_descuento_25)),
                         "ahorro_en_juego": round(float(ahorro)) if ahorro else 0,
-                        "secretaria": c.secretaria
                     })
 
             alertas_vencimiento.sort(key=lambda x: x["dias_habiles_restantes"])
@@ -140,12 +131,7 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
             
             comparendos_pagados = [
                 {
-                    "id": c.id,
-                    "placa": c.placa,
-                    "numero_comparendo": c.numero_comparendo,
-                    "codigo_infraccion": c.codigo_infraccion,
-                    "secretaria": c.secretaria,
-                    "valor_total": round(float(c.valor_total)) if c.valor_total else 0,
+                    **serializar_comparendo(c),
                     "fecha_actualizacion": c.fecha_descarga_simit.strftime("%Y-%m-%d") if c.fecha_descarga_simit else (c.fecha_ultima_actualizacion.strftime("%Y-%m-%d") if c.fecha_ultima_actualizacion else None)
                 }
                 for c in sesion.scalars(stmt_pagados).all()
