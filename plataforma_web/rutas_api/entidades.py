@@ -33,16 +33,26 @@ def listar_entidades() -> Dict[str, Any]:
             repo = RepositorioBaseDatos(sesion)
             entidades = repo.obtener_entidades_consulta(solo_activas=False)
             
+            from agente_extraccion_simit.utilidades_documento import calcular_digito_verificacion
+
             items = []
             alertas_pendientes = 0
             for e in entidades:
                 if e.requiere_desambiguacion or e.tipo_documento in ["Pendiente", "Sin especificar"]:
                     alertas_pendientes += 1
 
+                dv = None
+                criterio_con_dv = None
+                if e.tipo_documento in ["NIT", "AMBOS"] and e.criterio_busqueda.isdigit() and len(e.criterio_busqueda) >= 8:
+                    dv = calcular_digito_verificacion(e.criterio_busqueda)
+                    criterio_con_dv = f"{e.criterio_busqueda}{dv}"
+
                 items.append({
                     "id": e.id,
                     "nombre_entidad": e.nombre_entidad,
                     "criterio_busqueda": e.criterio_busqueda,
+                    "digito_verificacion": dv,
+                    "criterio_con_dv": criterio_con_dv,
                     "tipo_documento": e.tipo_documento,
                     "activo": e.activo,
                     "requiere_desambiguacion": e.requiere_desambiguacion,

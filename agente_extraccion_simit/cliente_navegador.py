@@ -404,11 +404,31 @@ class ClienteNavegadorSimit:
     ) -> ResultadoConsultaSchema:
         """
         Ejecuta la consulta de un NIT, Cédula o Placa en una página ya abierta de SIMIT.
-        Si la entidad está configurada como 'AMBOS' (o se solicita 'AMBOS'), ejecuta la consulta
-        en dos pasadas (NIT y Cédula) si SIMIT detecta ambas identidades, unificando resultados.
+        - Si es un NIT corporativo, realiza la búsqueda dual automática:
+          1) Variante sin dígito de verificación (ej: 900160091).
+          2) Variante con dígito de verificación continuo (ej: 9001600910).
+          Consolida y desduplica los comparendos obtenidos de ambas pasadas.
+        - Si la entidad está configurada como 'AMBOS' (o se solicita 'AMBOS'), desambigua
+          adicionalmente entre NIT y Cédula si SIMIT detecta ambas identidades.
         """
-        criterio_clean = re.sub(r'[^A-Z0-9]', '', str(criterio).upper())
-        logger.info(f"Consultando en portal SIMIT ({tipo_consulta}: {criterio_clean})...")
+        from agente_extraccion_simit.utilidades_documento import obtener_variantes_busqueda, descomponer_nit
+
+        criterio_raw = str(criterio).strip()
+        criterio_clean = re.sub(r'[^A-Z0-9]', '', criterio_raw.upper())
+        tipo_solicitado = str(tipo_consulta).strip().upper()
+
+        # Determinar si es placa, cédula o NIT
+        es_placa = (tipo_solicitado == "PLACA") or (len(criterio_clean) <= 6 and not criterio_clean.isdigit())
+        es_cedula = tipo_solicitado in ("CÉDULA", "CEDULA", "CC")
+        es_nit = not es_placa and not es_cedula
+
+        if es_nit:
+            nit_base, dv_calc = descomponer_nit(criterio_raw)
+            criterio_canonico = nit_base
+        else:
+            criterio_canonico = criterio_clean
+
+        logger.info(f"Iniciando consulta SIMIT ({tipo_consulta}: '{criterio_raw}' -> Canónico: '{criterio_canonico}')...")
 
         # Consultar si en base de datos la entidad está configurada como AMBOS
         pref_bd = None
@@ -417,101 +437,121 @@ class ClienteNavegadorSimit:
             from base_datos.repositorio import RepositorioBaseDatos
             with obtener_sesion_bd() as sesion:
                 repo = RepositorioBaseDatos(sesion)
-                pref_bd = repo.obtener_preferencia_documento(criterio_clean)
+                pref_bd = repo.obtener_preferencia_documento(criterio_canonico)
         except Exception:
             pass
 
-        tipo_solicitado = str(tipo_consulta).strip().upper()
         es_ambos = (tipo_solicitado == "AMBOS") or (pref_bd and pref_bd.strip().upper() == "AMBOS")
 
-        if es_ambos:
-            logger.info(f"Modo AMBOS activo para {criterio_clean}: Se consultarán comparendos bajo NIT y Cédula.")
+        # Generar las variantes a consultar en SIMIT
+        if es_nit:
+            variantes = obtener_variantes_busqueda(criterio_raw, "NIT")
+        elif es_placa:
+            variantes = [{"criterio": criterio_clean, "tipo_variante": "PLACA", "descripcion": f"Placa vehicular {criterio_clean}"}]
+        else:
+            variantes = [{"criterio": criterio_clean, "tipo_variante": "CEDULA", "descripcion": f"Cédula {criterio_clean}"}]
+
+        todos_los_comparendos: List[ComparendoSchema] = []
+        hubo_al_menos_un_exito = False
+        ultimo_error = None
+        alerta_desambiguacion_requerida = False
+
+        for idx_var, var_info in enumerate(variantes, 1):
+            var_criterio = var_info["criterio"]
+            var_desc = var_info.get("descripcion", var_criterio)
             
-            # Pasada 1: Buscar bajo NIT
-            exito_nit, comps_nit, modal_visto, err_nit = await self._ejecutar_busqueda_en_pagina(
-                page, criterio_clean, tipo_preferencia="NIT", api_holder=api_holder
-            )
-            
-            if not exito_nit and err_nit and "Requiere configurar" in err_nit:
-                return ResultadoConsultaSchema(
-                    criterio_busqueda=criterio_clean,
-                    tipo_consulta=TipoConsulta.AMBOS,
-                    exitoso=True,
-                    total_comparendos=0,
-                    total_valor_total=0.0,
-                    total_valor_con_descuento_vigente=0.0,
-                    comparendos=[],
-                    mensaje_error=err_nit
+            if len(variantes) > 1:
+                logger.info(f"\n[Variante {idx_var}/{len(variantes)}] Consultando en SIMIT: {var_desc}...")
+
+            if es_ambos:
+                logger.info(f"Modo AMBOS activo para {var_criterio}: Se consultarán comparendos bajo NIT y Cédula.")
+                exito_nit, comps_nit, modal_visto, err_nit = await self._ejecutar_busqueda_en_pagina(
+                    page, var_criterio, tipo_preferencia="NIT", api_holder=api_holder
                 )
+                if not exito_nit and err_nit and "Requiere configurar" in err_nit:
+                    alerta_desambiguacion_requerida = True
+                    ultimo_error = err_nit
+                    continue
 
-            comps_totales = list(comps_nit) if exito_nit else []
+                if exito_nit:
+                    hubo_al_menos_un_exito = True
+                    todos_los_comparendos.extend(comps_nit)
 
-            # Pasada 2: Buscar bajo Cédula (solo si el modal de desambiguación existe en SIMIT)
-            if modal_visto:
-                logger.info(f"Modal de múltiples identidades confirmado en SIMIT. Ejecutando Pasada 2 (Cédula) para {criterio_clean}...")
-                await page.wait_for_timeout(1500)
-                exito_cc, comps_cc, _, err_cc = await self._ejecutar_busqueda_en_pagina(
-                    page, criterio_clean, tipo_preferencia="Cédula", api_holder=api_holder
+                if modal_visto:
+                    logger.info(f"Modal de múltiples identidades detectado para {var_criterio}. Ejecutando pasada secundaria como Cédula...")
+                    await page.wait_for_timeout(1500)
+                    exito_cc, comps_cc, _, err_cc = await self._ejecutar_busqueda_en_pagina(
+                        page, var_criterio, tipo_preferencia="Cédula", api_holder=api_holder
+                    )
+                    if exito_cc and comps_cc:
+                        todos_los_comparendos.extend(comps_cc)
+            else:
+                tipo_pref = tipo_consulta if tipo_consulta in ["NIT", "Cédula"] else ("NIT" if es_nit else pref_bd)
+                exito, comps_var, _, err_var = await self._ejecutar_busqueda_en_pagina(
+                    page, var_criterio, tipo_preferencia=tipo_pref, api_holder=api_holder
                 )
-                if exito_cc and comps_cc:
-                    logger.info(f"Pasada 2 (Cédula) completada: {len(comps_cc)} registros encontrados.")
-                    comps_totales.extend(comps_cc)
-
-            # Desduplicar comparendos
-            comparendos_unicos = []
-            claves_vistas = set()
-            for c in comps_totales:
-                clave = c.numero_comparendo or c.numero_resolucion
-                if clave:
-                    if clave not in claves_vistas:
-                        claves_vistas.add(clave)
-                        comparendos_unicos.append(c)
+                if exito:
+                    hubo_al_menos_un_exito = True
+                    todos_los_comparendos.extend(comps_var)
+                    logger.info(f"Variante {var_criterio}: {len(comps_var)} registros encontrados.")
                 else:
-                    comparendos_unicos.append(c)
+                    if err_var and "Requiere configurar" in err_var:
+                        alerta_desambiguacion_requerida = True
+                    ultimo_error = err_var
+                    logger.warning(f"Variante {var_criterio} finalizó con aviso: {err_var}")
 
-            comparendos_enriquecidos = [calculate_discounts(c) for c in comparendos_unicos]
-            total_nominal = sum(c.valor_total for c in comparendos_enriquecidos)
-            total_con_descuento = sum(
-                c.valor_con_descuento_50 if c.aplica_descuento_50 
-                else (c.valor_con_descuento_25 if c.aplica_descuento_25 else c.valor_total)
-                for c in comparendos_enriquecidos
-            )
+            if idx_var < len(variantes):
+                await page.wait_for_timeout(1200)
 
-            logger.info(f"Consolidación AMBOS finalizada para {criterio_clean}: {len(comparendos_enriquecidos)} comparendos únicos en total.")
-            return ResultadoConsultaSchema(
-                criterio_busqueda=criterio_clean,
-                tipo_consulta=TipoConsulta.AMBOS,
-                exitoso=(exito_nit or bool(comps_totales)),
-                total_comparendos=len(comparendos_enriquecidos),
-                total_valor_total=total_nominal,
-                total_valor_con_descuento_vigente=total_con_descuento,
-                comparendos=comparendos_enriquecidos,
-                mensaje_error=None if (exito_nit or bool(comps_totales)) else err_nit
-            )
-
-        # MODO ESTÁNDAR (UN SOLO TIPO: NIT, Cédula o Placa)
-        tipo_pref = tipo_consulta if tipo_consulta in ["NIT", "Cédula"] else pref_bd
-        exito, comparendos, _, error_msg = await self._ejecutar_busqueda_en_pagina(
-            page, criterio_clean, tipo_preferencia=tipo_pref, api_holder=api_holder
-        )
-
-        tipo_enum = TipoConsulta.NIT if (tipo_consulta == "NIT" or criterio_clean.isdigit()) else TipoConsulta.PLACA
-        if tipo_consulta in ["Cédula", "CEDULA"]:
+        # Definir tipo de consulta para el resultado
+        if es_ambos:
+            tipo_enum = TipoConsulta.AMBOS
+        elif es_nit:
+            tipo_enum = TipoConsulta.NIT
+        elif es_cedula:
             tipo_enum = TipoConsulta.CEDULA
+        else:
+            tipo_enum = TipoConsulta.PLACA
 
-        if not exito:
+        if not hubo_al_menos_un_exito and alerta_desambiguacion_requerida:
             return ResultadoConsultaSchema(
-                criterio_busqueda=criterio_clean,
+                criterio_busqueda=criterio_canonico,
                 tipo_consulta=tipo_enum,
-                exitoso=(error_msg and "Requiere configurar" in error_msg),
+                exitoso=True,
                 total_comparendos=0,
                 total_valor_total=0.0,
                 total_valor_con_descuento_vigente=0.0,
                 comparendos=[],
-                mensaje_error=error_msg
+                mensaje_error=ultimo_error or "Requiere configurar si es NIT o Cédula en la plataforma web"
             )
 
-        comparendos_enriquecidos = [calculate_discounts(c) for c in comparendos]
+        if not hubo_al_menos_un_exito:
+            return ResultadoConsultaSchema(
+                criterio_busqueda=criterio_canonico,
+                tipo_consulta=tipo_enum,
+                exitoso=False,
+                total_comparendos=0,
+                total_valor_total=0.0,
+                total_valor_con_descuento_vigente=0.0,
+                comparendos=[],
+                mensaje_error=ultimo_error or "No se pudo obtener respuesta del portal SIMIT"
+            )
+
+        # Desduplicación inteligente de comparendos
+        comparendos_unicos = []
+        claves_vistas = set()
+        for comp in todos_los_comparendos:
+            comp.criterio_busqueda = criterio_canonico
+            clave = comp.numero_comparendo or comp.numero_resolucion
+            if clave:
+                if clave not in claves_vistas:
+                    claves_vistas.add(clave)
+                    comparendos_unicos.append(comp)
+            else:
+                comparendos_unicos.append(comp)
+
+        # Cálculo de descuentos según normativa colombiana vigente
+        comparendos_enriquecidos = [calculate_discounts(c) for c in comparendos_unicos]
         total_nominal = sum(c.valor_total for c in comparendos_enriquecidos)
         total_con_descuento = sum(
             c.valor_con_descuento_50 if c.aplica_descuento_50 
@@ -519,8 +559,15 @@ class ClienteNavegadorSimit:
             for c in comparendos_enriquecidos
         )
 
+        if len(variantes) > 1:
+            logger.info(
+                f"Consolidación dual finalizada para {criterio_canonico}: "
+                f"{len(comparendos_enriquecidos)} comparendos únicos consolidados "
+                f"(Total: ${total_nominal:,.2f} COP)."
+            )
+
         return ResultadoConsultaSchema(
-            criterio_busqueda=criterio_clean,
+            criterio_busqueda=criterio_canonico,
             tipo_consulta=tipo_enum,
             exitoso=True,
             total_comparendos=len(comparendos_enriquecidos),
@@ -529,6 +576,7 @@ class ClienteNavegadorSimit:
             comparendos=comparendos_enriquecidos,
             mensaje_error=None
         )
+
 
     async def consultar_en_vivo_async(self, criterio: str, tipo_consulta: str) -> ResultadoConsultaSchema:
         """Consulta individual: abre el navegador, consulta el criterio y cierra el navegador."""

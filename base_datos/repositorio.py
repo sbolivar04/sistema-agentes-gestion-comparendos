@@ -25,9 +25,17 @@ class RepositorioBaseDatos:
         # 1. Conciliación de Comparendos
         numeros_extraidos = {c.numero_comparendo for c in comparendos_extraidos}
         
+        # Determinar criterios equivalentes para la conciliación (con y sin DV continuo)
+        from agente_extraccion_simit.utilidades_documento import descomponer_nit
+        criterio_limpio = str(criterio).replace("-", "").strip()
+        criterios_conciliacion = [criterio_limpio]
+        if criterio_limpio.isdigit() and len(criterio_limpio) >= 8:
+            base_nit, dv = descomponer_nit(criterio_limpio)
+            criterios_conciliacion = list({criterio_limpio, base_nit, f"{base_nit}{dv}"})
+
         comparendos_db_activos = self.session.execute(
             select(ComparendoORM)
-            .where(ComparendoORM.criterio_busqueda == criterio)
+            .where(ComparendoORM.criterio_busqueda.in_(criterios_conciliacion))
             .where(ComparendoORM.estado_simit == 'Activo')
         ).scalars().all()
         
@@ -158,10 +166,16 @@ class RepositorioBaseDatos:
         return self.session.get(EntidadConsultaORM, id_entidad)
 
     def obtener_entidad_por_criterio(self, criterio: str) -> Optional[EntidadConsultaORM]:
-        """Obtiene una entidad por su número de documento o criterio de búsqueda."""
+        """Obtiene una entidad por su número de documento o criterio de búsqueda (reconoce variantes con/sin DV)."""
         criterio_limpio = str(criterio).replace("-", "").strip()
+        criterios_busqueda = [criterio_limpio]
+        if criterio_limpio.isdigit() and len(criterio_limpio) >= 8:
+            from agente_extraccion_simit.utilidades_documento import descomponer_nit
+            base_nit, dv = descomponer_nit(criterio_limpio)
+            criterios_busqueda = list({criterio_limpio, base_nit, f"{base_nit}{dv}"})
+
         return self.session.scalar(
-            select(EntidadConsultaORM).where(EntidadConsultaORM.criterio_busqueda == criterio_limpio)
+            select(EntidadConsultaORM).where(EntidadConsultaORM.criterio_busqueda.in_(criterios_busqueda))
         )
 
     def crear_entidad_consulta(
@@ -173,9 +187,19 @@ class RepositorioBaseDatos:
     ) -> EntidadConsultaORM:
         """Crea y registra una nueva entidad para monitoreo y consulta de comparendos."""
         criterio_limpio = str(criterio_busqueda).replace("-", "").strip()
+        
+        # Si es NIT, normalizar al NIT base canónico
+        if tipo_documento.upper() in ["NIT", "AMBOS"] and criterio_limpio.isdigit() and len(criterio_limpio) >= 8:
+            from agente_extraccion_simit.utilidades_documento import descomponer_nit
+            nit_base, _ = descomponer_nit(criterio_limpio)
+            criterio_almacenar = nit_base
+        else:
+            criterio_almacenar = criterio_limpio
+
         existente = self.obtener_entidad_por_criterio(criterio_limpio)
         if existente:
             existente.nombre_entidad = nombre_entidad.strip()
+            existente.criterio_busqueda = criterio_almacenar
             existente.tipo_documento = tipo_documento.strip()
             existente.activo = activo
             existente.requiere_desambiguacion = False
@@ -184,7 +208,7 @@ class RepositorioBaseDatos:
 
         nueva_entidad = EntidadConsultaORM(
             nombre_entidad=nombre_entidad.strip(),
-            criterio_busqueda=criterio_limpio,
+            criterio_busqueda=criterio_almacenar,
             tipo_documento=tipo_documento.strip(),
             activo=activo,
             requiere_desambiguacion=False
