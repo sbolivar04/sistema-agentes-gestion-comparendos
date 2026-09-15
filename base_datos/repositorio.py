@@ -150,6 +150,75 @@ class RepositorioBaseDatos:
         self.session.flush()
         return log
 
+    def recalcular_descuentos_comparendos_existentes(self) -> int:
+        """
+        Recorre todos los comparendos y multas de la base de datos y recalcula sus descuentos,
+        garantizando que multas con resolución o intereses no tengan descuento activo y que los
+        comparendos físicos tengan su fecha de notificación en vía.
+        """
+        from agente_extraccion_simit.motor_descuentos import calcular_descuentos
+        from agente_extraccion_simit.modelos import ComparendoSchema
+
+        stmt = select(ComparendoORM)
+        comparendos_bd = list(self.session.scalars(stmt).all())
+        actualizados = 0
+
+        for c in comparendos_bd:
+            esquema_temp = ComparendoSchema(
+                numero_comparendo=c.numero_comparendo,
+                numero_resolucion=c.numero_resolucion,
+                tipo_registro=c.tipo_registro,
+                fecha_infraccion=c.fecha_infraccion,
+                fecha_notificacion=c.fecha_notificacion,
+                fecha_resolucion=c.fecha_resolucion,
+                placa=c.placa,
+                criterio_busqueda=c.criterio_busqueda,
+                codigo_infraccion=c.codigo_infraccion,
+                descripcion_infraccion=c.descripcion_infraccion,
+                secretaria=c.secretaria,
+                valor=c.valor or 0.0,
+                intereses=c.intereses or 0.0,
+                valor_total=c.valor_total or 0.0,
+                es_fotodeteccion=c.es_fotodeteccion
+            )
+
+            esquema_recalc = calcular_descuentos(esquema_temp)
+
+            cambio = False
+            if c.aplica_descuento_50 != esquema_recalc.aplica_descuento_50:
+                c.aplica_descuento_50 = esquema_recalc.aplica_descuento_50
+                cambio = True
+            if c.aplica_descuento_25 != esquema_recalc.aplica_descuento_25:
+                c.aplica_descuento_25 = esquema_recalc.aplica_descuento_25
+                cambio = True
+            if c.valor_con_descuento_50 != esquema_recalc.valor_con_descuento_50:
+                c.valor_con_descuento_50 = esquema_recalc.valor_con_descuento_50
+                cambio = True
+            if c.valor_con_descuento_25 != esquema_recalc.valor_con_descuento_25:
+                c.valor_con_descuento_25 = esquema_recalc.valor_con_descuento_25
+                cambio = True
+            if c.fecha_limite_descuento_50 != esquema_recalc.fecha_limite_descuento_50:
+                c.fecha_limite_descuento_50 = esquema_recalc.fecha_limite_descuento_50
+                cambio = True
+            if c.fecha_limite_descuento_25 != esquema_recalc.fecha_limite_descuento_25:
+                c.fecha_limite_descuento_25 = esquema_recalc.fecha_limite_descuento_25
+                cambio = True
+            if not c.fecha_notificacion and esquema_recalc.fecha_notificacion:
+                c.fecha_notificacion = esquema_recalc.fecha_notificacion
+                cambio = True
+
+            es_multa = (str(c.tipo_registro).strip().lower() == "multa") or bool(c.fecha_resolucion) or bool(c.intereses and c.intereses > 0)
+            if es_multa and c.tipo_registro != "Multa":
+                c.tipo_registro = "Multa"
+                cambio = True
+
+            if cambio:
+                c.fecha_ultima_actualizacion = datetime.now()
+                actualizados += 1
+
+        self.session.flush()
+        return actualizados
+
     # =========================================================================
     # GESTIÓN CONSOLIDADA DE ENTIDADES Y PREFERENCIAS DE CONSULTA
     # =========================================================================

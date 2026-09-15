@@ -231,6 +231,15 @@ class ClienteNavegadorSimit:
                 except Exception as ex_detail:
                     logger.warning(f"No se pudo acceder a la vista detallada de {num_resolucion_val}: {ex_detail}")
 
+            # Reglas legales:
+            # 1. Comparendo físico (en vía con agente): la notificación se realiza en el acto de la infracción
+            if not es_foto and not fecha_notif and fecha_val:
+                fecha_notif = fecha_val
+
+            # 2. Si cuenta con fecha de resolución o intereses de mora, es jurídicamente una Multa en firme
+            if fecha_resolucion_val or intereses_val > 0:
+                tipo_registro_val = "Multa"
+
             comparendos_extraidos.append(ComparendoSchema(
                 numero_comparendo=num_comp,
                 numero_resolucion=num_resolucion_val,

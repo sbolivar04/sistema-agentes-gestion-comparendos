@@ -12,13 +12,24 @@ def serializar_comparendo(c: ComparendoORM) -> Dict[str, Any]:
     Serializa un registro ORM de comparendo con todos los campos canónicos requeridos
     por la plataforma web (tabla, modales emergentes y notificaciones).
     """
-    if c.aplica_descuento_50:
+    tipo_str = str(c.tipo_registro or "").strip().lower()
+    tiene_resolucion = bool(c.fecha_resolucion)
+    tiene_intereses = bool(c.intereses and float(c.intereses) > 0)
+    es_multa = (tipo_str == "multa") or tiene_resolucion or tiene_intereses
+    es_foto = bool(c.es_fotodeteccion)
+
+    if es_multa:
+        # Multa / Resolución en firme / Intereses causados: Tarifa plena 100% sin beneficio
+        tag_desc = "Sin Descuento"
+        fecha_lim = "Vencido"
+        val_pagar = c.valor_total
+    elif c.aplica_descuento_50:
         if c.fecha_limite_descuento_50:
             tag_desc = "50% Vigente"
             fecha_lim = str(c.fecha_limite_descuento_50)
         else:
-            tag_desc = "50% (Sin Notificar)"
-            fecha_lim = "Pendiente Notificación"
+            tag_desc = "50% (Sin Notificar)" if es_foto else "50% Vigente"
+            fecha_lim = "Pendiente Notificación" if es_foto else "Vencido"
         val_pagar = c.valor_con_descuento_50
     elif c.aplica_descuento_25:
         if c.fecha_limite_descuento_25:
@@ -26,12 +37,26 @@ def serializar_comparendo(c: ComparendoORM) -> Dict[str, Any]:
             fecha_lim = str(c.fecha_limite_descuento_25)
         else:
             tag_desc = "25% Vigente"
-            fecha_lim = "Pendiente Notificación"
+            fecha_lim = "Vencido"
         val_pagar = c.valor_con_descuento_25
     else:
         tag_desc = "Sin Descuento"
         fecha_lim = "Vencido"
         val_pagar = c.valor_total
+
+    # Determinación legal de fecha de notificación para visualización
+    if c.fecha_notificacion:
+        fecha_notif_str = c.fecha_notificacion.strftime("%Y-%m-%d")
+    elif not es_foto and c.fecha_infraccion:
+        # Comparendo físico entregado en vía en la fecha de la infracción
+        fecha_notif_str = c.fecha_infraccion.strftime("%Y-%m-%d")
+    elif es_multa and c.fecha_infraccion:
+        # Multas con resolución firme ya fueron notificadas legalmente
+        fecha_notif_str = c.fecha_infraccion.strftime("%Y-%m-%d")
+    else:
+        fecha_notif_str = "En proceso de notificación"
+
+    tipo_registro_final = "Multa" if es_multa else (c.tipo_registro or "Comparendo")
 
     return {
         "id": c.id,
@@ -39,13 +64,13 @@ def serializar_comparendo(c: ComparendoORM) -> Dict[str, Any]:
         "numero_resolucion": c.numero_resolucion,
         "placa": c.placa,
         "criterio_busqueda": c.criterio_busqueda,
-        "tipo_registro": c.tipo_registro,
+        "tipo_registro": tipo_registro_final,
         "codigo_infraccion": c.codigo_infraccion,
         "descripcion_infraccion": c.descripcion_infraccion,
         "secretaria": c.secretaria,
         "direccion": c.direccion,
         "fecha_infraccion": c.fecha_infraccion.strftime("%Y-%m-%d %H:%M") if c.fecha_infraccion else "N/A",
-        "fecha_notificacion": c.fecha_notificacion.strftime("%Y-%m-%d") if c.fecha_notificacion else "En proceso de notificación",
+        "fecha_notificacion": fecha_notif_str,
         "fecha_resolucion": c.fecha_resolucion.strftime("%Y-%m-%d") if c.fecha_resolucion else None,
         "valor_nominal": round(float(c.valor)) if c.valor else 0,
         "intereses": round(float(c.intereses)) if c.intereses else 0,
@@ -53,7 +78,7 @@ def serializar_comparendo(c: ComparendoORM) -> Dict[str, Any]:
         "etiqueta_descuento": tag_desc,
         "fecha_limite_descuento": fecha_lim,
         "valor_a_pagar": round(float(val_pagar)) if val_pagar else 0,
-        "ahorro_disponible": round(float(c.valor_total - val_pagar)) if (val_pagar and c.valor_total) else 0,
+        "ahorro_disponible": round(float(c.valor_total - val_pagar)) if (val_pagar and c.valor_total and not es_multa) else 0,
         "estado_simit": c.estado_simit
     }
 

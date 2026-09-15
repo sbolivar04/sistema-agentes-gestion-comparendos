@@ -313,15 +313,15 @@ export function ModalDetalleComparendo({ comparendo, alCerrar }) {
 
                 <div className="modal-fila-precio destacada">
                   <div>
-                    <span style={{ display: 'block', fontSize: '0.75rem', color: '#059669', fontWeight: 700, textTransform: 'uppercase' }}>
+                    <span style={{ display: 'block', fontSize: '0.75rem', color: comparendo.ahorro_disponible > 0 ? '#059669' : 'var(--texto-secundario)', fontWeight: 700, textTransform: 'uppercase' }}>
                       {esPagado ? 'Total Pagado' : 'Total a Pagar Hoy'}
                     </span>
-                    <span style={{ fontSize: '0.72rem', color: '#059669' }}>
+                    <span style={{ fontSize: '0.72rem', color: comparendo.ahorro_disponible > 0 ? '#059669' : 'var(--texto-secundario)' }}>
                       {esPagado
                         ? (comparendo.ahorro_disponible > 0 
                             ? `Beneficio aplicado: ${comparendo.etiqueta_descuento?.replace('Vigente', '').trim()}`
                             : 'Paz y Salvo SIMIT')
-                        : (comparendo.etiqueta_descuento ? `Beneficio: ${comparendo.etiqueta_descuento}` : 'Tarifa Plena')}
+                        : (comparendo.ahorro_disponible > 0 ? `Beneficio: ${comparendo.etiqueta_descuento}` : 'Tarifa Plena (Sin descuento)')}
                     </span>
                   </div>
                   <span className="monto">
