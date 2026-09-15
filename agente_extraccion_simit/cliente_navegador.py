@@ -394,6 +394,15 @@ class ClienteNavegadorSimit:
                 break
             else:
                 logger.warning(f"[Intento {intento}] Tiempo de espera agotado sin respuesta clara de SIMIT para {criterio_clean}. Reintentando...")
+                if intento < max_intentos:
+                    try:
+                        logger.info(f"[Intento {intento}] Limpiando estado de SIMIT y recargando página antes del intento {intento + 1}...")
+                        await self._cerrar_anuncios_iniciales(page)
+                        await page.goto(self.simit_url, wait_until="domcontentloaded", timeout=25000)
+                        await self._cerrar_anuncios_iniciales(page)
+                        await page.wait_for_timeout(1000)
+                    except Exception as e_reload:
+                        logger.warning(f"[Intento {intento}] No se pudo recargar la página limpia: {e_reload}")
 
         if not busqueda_exitosa:
             return False, [], modal_detectado, f"SIMIT no respondió correctamente tras {max_intentos} intentos para {criterio_clean}."
@@ -461,7 +470,8 @@ class ClienteNavegadorSimit:
             variantes = [{"criterio": criterio_clean, "tipo_variante": "CEDULA", "descripcion": f"Cédula {criterio_clean}"}]
 
         todos_los_comparendos: List[ComparendoSchema] = []
-        hubo_al_menos_un_exito = False
+        variantes_exitosas = []
+        variantes_fallidas = []
         ultimo_error = None
         alerta_desambiguacion_requerida = False
 
@@ -480,11 +490,15 @@ class ClienteNavegadorSimit:
                 if not exito_nit and err_nit and "Requiere configurar" in err_nit:
                     alerta_desambiguacion_requerida = True
                     ultimo_error = err_nit
+                    variantes_fallidas.append({"criterio": var_criterio, "error": err_nit})
                     continue
 
                 if exito_nit:
-                    hubo_al_menos_un_exito = True
+                    variantes_exitosas.append(f"{var_criterio} (NIT)")
                     todos_los_comparendos.extend(comps_nit)
+                else:
+                    variantes_fallidas.append({"criterio": f"{var_criterio} (NIT)", "error": err_nit})
+                    ultimo_error = err_nit
 
                 if modal_visto:
                     logger.info(f"Modal de múltiples identidades detectado para {var_criterio}. Ejecutando pasada secundaria como Cédula...")
@@ -492,18 +506,24 @@ class ClienteNavegadorSimit:
                     exito_cc, comps_cc, _, err_cc = await self._ejecutar_busqueda_en_pagina(
                         page, var_criterio, tipo_preferencia="Cédula", api_holder=api_holder
                     )
-                    if exito_cc and comps_cc:
-                        todos_los_comparendos.extend(comps_cc)
+                    if exito_cc:
+                        variantes_exitosas.append(f"{var_criterio} (Cédula)")
+                        if comps_cc:
+                            todos_los_comparendos.extend(comps_cc)
+                    else:
+                        variantes_fallidas.append({"criterio": f"{var_criterio} (Cédula)", "error": err_cc})
+                        ultimo_error = err_cc
             else:
                 tipo_pref = tipo_consulta if tipo_consulta in ["NIT", "Cédula"] else ("NIT" if es_nit else pref_bd)
                 exito, comps_var, _, err_var = await self._ejecutar_busqueda_en_pagina(
                     page, var_criterio, tipo_preferencia=tipo_pref, api_holder=api_holder
                 )
                 if exito:
-                    hubo_al_menos_un_exito = True
+                    variantes_exitosas.append(var_criterio)
                     todos_los_comparendos.extend(comps_var)
                     logger.info(f"Variante {var_criterio}: {len(comps_var)} registros encontrados.")
                 else:
+                    variantes_fallidas.append({"criterio": var_criterio, "error": err_var})
                     if err_var and "Requiere configurar" in err_var:
                         alerta_desambiguacion_requerida = True
                     ultimo_error = err_var
@@ -522,6 +542,10 @@ class ClienteNavegadorSimit:
         else:
             tipo_enum = TipoConsulta.PLACA
 
+        hubo_al_menos_un_exito = len(variantes_exitosas) > 0
+        hubo_fallo_parcial = len(variantes_fallidas) > 0
+        extraccion_completa = (not hubo_fallo_parcial) and hubo_al_menos_un_exito
+
         if not hubo_al_menos_un_exito and alerta_desambiguacion_requerida:
             return ResultadoConsultaSchema(
                 criterio_busqueda=criterio_canonico,
@@ -531,7 +555,9 @@ class ClienteNavegadorSimit:
                 total_valor_total=0.0,
                 total_valor_con_descuento_vigente=0.0,
                 comparendos=[],
-                mensaje_error=ultimo_error or "Requiere configurar si es NIT o Cédula en la plataforma web"
+                mensaje_error=ultimo_error or "Requiere configurar si es NIT o Cédula en la plataforma web",
+                permitir_conciliacion=False,
+                extraccion_completa=False
             )
 
         if not hubo_al_menos_un_exito:
@@ -543,7 +569,9 @@ class ClienteNavegadorSimit:
                 total_valor_total=0.0,
                 total_valor_con_descuento_vigente=0.0,
                 comparendos=[],
-                mensaje_error=ultimo_error or "No se pudo obtener respuesta del portal SIMIT"
+                mensaje_error=ultimo_error or "No se pudo obtener respuesta del portal SIMIT",
+                permitir_conciliacion=False,
+                extraccion_completa=False
             )
 
         # Desduplicación inteligente de comparendos
@@ -568,6 +596,49 @@ class ClienteNavegadorSimit:
             for c in comparendos_enriquecidos
         )
 
+        # Si hubo fallo parcial en alguna variante obligatoria
+        if hubo_fallo_parcial:
+            detalles_fallas = "; ".join(f"{v['criterio']}: {v.get('error', 'sin respuesta')}" for v in variantes_fallidas)
+            
+            # Si no se encontraron comparendos pero alguna variante falló, es un falso vacío
+            if len(comparendos_enriquecidos) == 0:
+                msg_error_parcial = (
+                    f"Consulta incompleta en SIMIT: La variante falló ({detalles_fallas}). "
+                    f"Se cancela la conciliación para prevenir falsos paz y salvo."
+                )
+                logger.error(f"[PROTECCIÓN DE INTEGRIDAD] {criterio_canonico}: {msg_error_parcial}")
+                return ResultadoConsultaSchema(
+                    criterio_busqueda=criterio_canonico,
+                    tipo_consulta=tipo_enum,
+                    exitoso=False,
+                    total_comparendos=0,
+                    total_valor_total=0.0,
+                    total_valor_con_descuento_vigente=0.0,
+                    comparendos=[],
+                    mensaje_error=msg_error_parcial,
+                    permitir_conciliacion=False,
+                    extraccion_completa=False
+                )
+            else:
+                # Si se encontraron comparendos en una variante pero otra falló, guardar los encontrados sin conciliar los existentes
+                msg_aviso_parcial = (
+                    f"Extracción parcial: Se encontraron {len(comparendos_enriquecidos)} comparendos pero alguna variante falló ({detalles_fallas}). "
+                    f"Conciliación omitida por protección."
+                )
+                logger.warning(f"[PROTECCIÓN DE INTEGRIDAD] {criterio_canonico}: {msg_aviso_parcial}")
+                return ResultadoConsultaSchema(
+                    criterio_busqueda=criterio_canonico,
+                    tipo_consulta=tipo_enum,
+                    exitoso=True,
+                    total_comparendos=len(comparendos_enriquecidos),
+                    total_valor_total=total_nominal,
+                    total_valor_con_descuento_vigente=total_con_descuento,
+                    comparendos=comparendos_enriquecidos,
+                    mensaje_error=msg_aviso_parcial,
+                    permitir_conciliacion=False,
+                    extraccion_completa=False
+                )
+
         if len(variantes) > 1:
             logger.info(
                 f"Consolidación dual finalizada para {criterio_canonico}: "
@@ -583,7 +654,9 @@ class ClienteNavegadorSimit:
             total_valor_total=total_nominal,
             total_valor_con_descuento_vigente=total_con_descuento,
             comparendos=comparendos_enriquecidos,
-            mensaje_error=None
+            mensaje_error=None,
+            permitir_conciliacion=True,
+            extraccion_completa=True
         )
 
 
@@ -598,7 +671,9 @@ class ClienteNavegadorSimit:
             total_valor_total=0.0,
             total_valor_con_descuento_vigente=0.0,
             comparendos=[],
-            mensaje_error="No se obtuvo respuesta del portal"
+            mensaje_error="No se pudo iniciar la sesión de consulta en vivo",
+            permitir_conciliacion=False,
+            extraccion_completa=False
         )
 
     async def consultar_lote_en_vivo_async(

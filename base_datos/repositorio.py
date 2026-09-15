@@ -17,34 +17,45 @@ class RepositorioBaseDatos:
         self.session = sesion_bd
         self.sesion = sesion_bd
 
-    def guardar_comparendos(self, comparendos_extraidos: List[Any], criterio: str) -> Tuple[int, int]:
-        """Inserta o actualiza registros. Concilia para marcar 'No activo' los que ya no están en SIMIT."""
+    def guardar_comparendos(
+        self,
+        comparendos_extraidos: List[Any],
+        criterio: str,
+        permitir_conciliacion: bool = True
+    ) -> Tuple[int, int]:
+        """Inserta o actualiza registros. Concilia para marcar 'No activo' los que ya no están en SIMIT solo si permitir_conciliacion=True."""
         nuevos = 0
         actualizados = 0
 
-        # 1. Conciliación de Comparendos
-        numeros_extraidos = {c.numero_comparendo for c in comparendos_extraidos}
-        
-        # Determinar criterios equivalentes para la conciliación (con y sin DV continuo)
-        from agente_extraccion_simit.utilidades_documento import descomponer_nit
-        criterio_limpio = str(criterio).replace("-", "").strip()
-        criterios_conciliacion = [criterio_limpio]
-        if criterio_limpio.isdigit() and len(criterio_limpio) >= 8:
-            base_nit, dv = descomponer_nit(criterio_limpio)
-            criterios_conciliacion = list({criterio_limpio, base_nit, f"{base_nit}{dv}"})
+        # 1. Conciliación de Comparendos (Solo si la extracción fue 100% íntegra y sin fallos parciales)
+        if permitir_conciliacion:
+            numeros_extraidos = {c.numero_comparendo for c in comparendos_extraidos}
+            
+            # Determinar criterios equivalentes para la conciliación (con y sin DV continuo)
+            from agente_extraccion_simit.utilidades_documento import descomponer_nit
+            criterio_limpio = str(criterio).replace("-", "").strip()
+            criterios_conciliacion = [criterio_limpio]
+            if criterio_limpio.isdigit() and len(criterio_limpio) >= 8:
+                base_nit, dv = descomponer_nit(criterio_limpio)
+                criterios_conciliacion = list({criterio_limpio, base_nit, f"{base_nit}{dv}"})
 
-        comparendos_db_activos = self.session.execute(
-            select(ComparendoORM)
-            .where(ComparendoORM.criterio_busqueda.in_(criterios_conciliacion))
-            .where(ComparendoORM.estado_simit == 'Activo')
-        ).scalars().all()
-        
-        for c_db in comparendos_db_activos:
-            if c_db.numero_comparendo not in numeros_extraidos:
-                c_db.estado_simit = "No activo"
-                c_db.fecha_descarga_simit = datetime.now()
-                actualizados += 1
-                logger.info(f"Conciliación: Comparendo {c_db.numero_comparendo} descargado de SIMIT -> Estado: No activo.")
+            comparendos_db_activos = self.session.execute(
+                select(ComparendoORM)
+                .where(ComparendoORM.criterio_busqueda.in_(criterios_conciliacion))
+                .where(ComparendoORM.estado_simit == 'Activo')
+            ).scalars().all()
+            
+            for c_db in comparendos_db_activos:
+                if c_db.numero_comparendo not in numeros_extraidos:
+                    c_db.estado_simit = "No activo"
+                    c_db.fecha_descarga_simit = datetime.now()
+                    actualizados += 1
+                    logger.info(f"Conciliación: Comparendo {c_db.numero_comparendo} descargado de SIMIT -> Estado: No activo.")
+        else:
+            logger.warning(
+                f"Conciliación omitida por seguridad para {criterio}: "
+                f"La extracción fue parcial o presentó fallas en alguna variante. Los comparendos activos se mantienen protegidos."
+            )
 
         # 2. Inserción o actualización
         for comp in comparendos_extraidos:

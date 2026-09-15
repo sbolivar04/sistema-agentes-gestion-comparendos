@@ -66,6 +66,8 @@ class EsquemaResultadoConsulta(BaseModel):
     total_valor_con_descuento_vigente: float = 0.0
     comparendos: List[EsquemaComparendo] = Field(default_factory=list)
     mensaje_error: Optional[str] = None
+    permitir_conciliacion: bool = Field(default=True, description="Indica si la extracción fue 100% íntegra para conciliar y dar de baja comparendos")
+    extraccion_completa: bool = Field(default=True, description="Indica si todas las variantes obligatorias respondieron sin timeout ni fallos")
 
 # Alias de compatibilidad
 ComparendoSchema = EsquemaComparendo

@@ -6,6 +6,7 @@ import { ModalDetalleComparendo } from './ModalDetalleComparendo'
 import { ModalGestionOperativa } from './ModalGestionOperativa'
 import { EtiquetaTooltip } from './EtiquetaTooltip'
 import { SelectorDesplegable } from './SelectorDesplegable'
+import { BotonExportarExcel } from './BotonExportarExcel'
 
 export function TablaComparendos({
   busquedaExterna = '',
@@ -385,7 +386,7 @@ export function TablaComparendos({
                 etiqueta: 'Pagados'
               }
             ]}
-            anchoMinimo="160px"
+            anchoMinimo="120px"
           />
 
           <SelectorDesplegable
@@ -419,7 +420,7 @@ export function TablaComparendos({
               }
             ]}
             icono={Percent}
-            anchoMinimo="180px"
+            anchoMinimo="155px"
           />
 
           <SelectorDesplegable
@@ -461,8 +462,16 @@ export function TablaComparendos({
               }
             ]}
             icono={FolderKanban}
-            anchoMinimo={filtroSubestado === 'todos' ? '170px' : '205px'}
+            anchoMinimo={filtroSubestado === 'todos' ? '150px' : '180px'}
             posicionAlineacion="derecha"
+          />
+
+          <BotonExportarExcel
+            busqueda={busqueda}
+            filtroEstado={filtroEstado}
+            filtroDescuento={filtroDescuento}
+            totalRegistros={comparendosFiltrados.length}
+            deshabilitado={cargando}
           />
         </div>
       </div>

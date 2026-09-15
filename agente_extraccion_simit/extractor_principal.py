@@ -94,12 +94,20 @@ def guardar_resultado_extraccion(
         return 0, 0
 
     # Guardar en Base de Datos (Supabase)
+    permitir_conciliacion = getattr(resultado, "permitir_conciliacion", True)
+    if not permitir_conciliacion:
+        print(f"\n[PROTECCIÓN DE INTEGRIDAD] Se omitirá la conciliación para {resultado.criterio_busqueda} porque la extracción presentó fallos en alguna variante. Los comparendos activos preexistentes se mantienen protegidos.")
+
     print(f"\n[PERSISTENCIA] Guardando datos en Supabase Cloud (comparendos_fscr) para {resultado.criterio_busqueda}...")
     nuevos = 0
     actualizados = 0
     with obtener_sesion_bd() as sesion:
         repo = RepositorioBaseDatos(sesion)
-        nuevos, actualizados = repo.guardar_comparendos(resultado.comparendos, resultado.criterio_busqueda)
+        nuevos, actualizados = repo.guardar_comparendos(
+            resultado.comparendos,
+            resultado.criterio_busqueda,
+            permitir_conciliacion=permitir_conciliacion
+        )
         
         repo.registrar_log_extraccion(
             criterio=resultado.criterio_busqueda,

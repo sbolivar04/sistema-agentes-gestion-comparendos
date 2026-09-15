@@ -2691,13 +2691,13 @@ body {
 .filtros-contenedor {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
 }
 
 .filtros-contenedor .selector-desplegable-boton {
-  padding: 0.46rem 0.8rem;
-  gap: 0.55rem;
+  padding: 0.44rem 0.72rem;
+  gap: 0.5rem;
 }
 
 .select-filtro {
@@ -6380,3 +6380,199 @@ input[type="number"] {
   background: #fb923c;
   box-shadow: 0 0 5px rgba(251, 146, 60, 0.65);
 }
+
+/* ==========================================================================
+   BOTÓN Y MENÚ FLOTANTE: EXPORTAR A EXCEL (.XLSX)
+   ========================================================================== */
+
+.boton-exportar-excel {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  background: var(--fondo-elevado);
+  border: 1px solid var(--borde-tarjeta);
+  color: var(--texto-principal);
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radio-md);
+  font-family: var(--fuente-cuerpo);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  white-space: nowrap;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.boton-exportar-excel:hover:not(:disabled) {
+  background: var(--fondo-tarjeta);
+  border-color: #10b981;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
+  color: #059669;
+}
+
+[data-tema="oscuro"] .boton-exportar-excel:hover:not(:disabled) {
+  color: #34d399;
+}
+
+.boton-exportar-excel.activo {
+  background: var(--fondo-tarjeta);
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18), 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.boton-exportar-excel:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+}
+
+.boton-exportar-excel .chevron-exportar {
+  color: var(--texto-atenuado);
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.boton-exportar-excel .chevron-exportar.rotado {
+  transform: rotate(180deg);
+}
+
+.menu-exportar-excel {
+  background: var(--fondo-tarjeta);
+  border: 1px solid var(--borde-tarjeta);
+  border-radius: 12px;
+  box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.25), 0 8px 16px -6px rgba(0, 0, 0, 0.12);
+  padding: 0.5rem;
+  backdrop-filter: blur(14px);
+  animation: deslizarEntradaDropdown 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.menu-exportar-encabezado {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.6rem 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--borde-tarjeta);
+  margin-bottom: 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--texto-atenuado);
+}
+
+.conteo-registros-export {
+  background: var(--fondo-elevado);
+  padding: 0.15rem 0.45rem;
+  border-radius: 10px;
+  font-size: 0.68rem;
+  color: var(--texto-secundario);
+}
+
+.opcion-exportar {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  width: 100%;
+}
+
+.opcion-exportar:hover {
+  background: var(--fondo-elevado);
+  transform: translateX(2px);
+}
+
+.opcion-exportar-icono-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.opcion-exportar-icono-wrap.icono-resumen {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.opcion-exportar-icono-wrap.icono-detallado {
+  background: rgba(2, 132, 199, 0.12);
+  color: #0284c7;
+}
+
+.opcion-exportar-contenido {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
+}
+
+.opcion-exportar-titulo-linea {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.opcion-exportar-titulo {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--texto-principal);
+}
+
+.opcion-exportar-desc {
+  font-size: 0.74rem;
+  color: var(--texto-secundario);
+  line-height: 1.3;
+  margin: 0;
+}
+
+.badge-exportar {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.12rem 0.45rem;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.badge-exportar.badge-verde {
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+}
+
+[data-tema="oscuro"] .badge-exportar.badge-verde {
+  color: #34d399;
+}
+
+.badge-exportar.badge-azul {
+  background: rgba(2, 132, 199, 0.15);
+  color: #0284c7;
+}
+
+[data-tema="oscuro"] .badge-exportar.badge-azul {
+  color: #38bdf8;
+}
+
+.icono-girando {
+  animation: girar 1s linear infinite;
+}
+
+@keyframes girar {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
