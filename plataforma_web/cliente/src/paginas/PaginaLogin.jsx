@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useAutenticacion } from '../contexto/ContextoAutenticacion'
-import { ShieldCheck, LogIn, Lock, Mail, AlertCircle, Sun, Moon, Users } from 'lucide-react'
+import { LogIn, Lock, Mail, AlertCircle, Sun, Moon } from 'lucide-react'
 import { useTema } from '../contexto/ContextoTema'
 
 export function PaginaLogin() {
@@ -19,16 +19,6 @@ export function PaginaLogin() {
     }
 
     const res = await iniciarSesion(email, password)
-    if (!res.exitoso) {
-      setError(res.error || 'Error al iniciar sesión. Verifica tus credenciales.')
-    }
-  }
-
-  const ingresarConCredenciales = async (correoSeleccionado, contrasenaSeleccionada) => {
-    setError('')
-    setEmail(correoSeleccionado)
-    setPassword(contrasenaSeleccionada)
-    const res = await iniciarSesion(correoSeleccionado, contrasenaSeleccionada)
     if (!res.exitoso) {
       setError(res.error || 'Error al iniciar sesión. Verifica tus credenciales.')
     }
@@ -114,37 +104,6 @@ export function PaginaLogin() {
             {cargando ? 'Ingresando...' : 'Iniciar Sesión'}
           </button>
         </form>
-
-        {/* Accesos rápidos corporativos por rol */}
-        <div style={{ marginTop: '1.15rem', paddingTop: '0.85rem', borderTop: '1px solid var(--borde-tarjeta, #e2e8f0)' }}>
-          <p style={{ fontSize: '0.7rem', color: 'var(--texto-terciario, #94a3b8)', marginBottom: '0.55rem', textAlign: 'center', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            Acceso Rápido por Rol
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-            <button
-              type="button"
-              className="boton-secundario"
-              style={{ fontSize: '0.75rem', padding: '0.45rem 0.5rem', justifyContent: 'center', gap: '0.35rem' }}
-              onClick={() => ingresarConCredenciales('admin@fscr.com.co', 'AdminFSCR2026*')}
-              disabled={cargando}
-              title="Ingresar como Administrador (Samir Bolívar)"
-            >
-              <ShieldCheck size={14} style={{ color: 'var(--color-primario, #2563eb)' }} />
-              <span>Administrador</span>
-            </button>
-            <button
-              type="button"
-              className="boton-secundario"
-              style={{ fontSize: '0.75rem', padding: '0.45rem 0.5rem', justifyContent: 'center', gap: '0.35rem' }}
-              onClick={() => ingresarConCredenciales('operaciones@fscr.com.co', 'FSCR2026*')}
-              disabled={cargando}
-              title="Ingresar como Operaciones FSCR"
-            >
-              <Users size={14} style={{ color: 'var(--color-exito-verde, #16a34a)' }} />
-              <span>Operaciones</span>
-            </button>
-          </div>
-        </div>
 
         <p className="login-pie">
           FSCR Ingeniería S.A.S. • Control de Operaciones
