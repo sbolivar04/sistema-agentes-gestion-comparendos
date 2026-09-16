@@ -4,7 +4,7 @@ import { EtiquetaTooltip } from './EtiquetaTooltip'
 
 export function TarjetasKPI({ metricas = {}, alertas = {}, onFiltrarPlacas, onFiltrarEstado }) {
   const formatoMoneda = (val) => {
-    return `$ ${Math.round(Number(val || 0)).toLocaleString('es-CO')}`
+    return `$${Math.round(Number(val || 0)).toLocaleString('es-CO')}`
   }
 
   const totalComparendos = metricas.total_comparendos ?? 0
@@ -71,9 +71,11 @@ export function TarjetasKPI({ metricas = {}, alertas = {}, onFiltrarPlacas, onFi
   const ahorroTotal = metricas.ahorro_potencial_total ?? metricas.total_ahorro_potencial ?? 0
   const ahorroInactivo = metricas.ahorro_potencial_inactivo ?? (ahorroTotal - ahorroActivo)
 
-  const deudaActiva = metricas.deuda_nominal_activa ?? 0
-  const deudaTotal = metricas.deuda_nominal_total ?? metricas.monto_total ?? 0
-  const deudaInactiva = metricas.deuda_nominal_inactiva ?? (deudaTotal - deudaActiva)
+  const deudaActiva = metricas.deuda_optimizada_activa ?? metricas.deuda_a_pagar_activa ?? metricas.deuda_nominal_activa ?? 0
+  const deudaTotal = metricas.deuda_optimizada_total ?? metricas.deuda_a_pagar_total ?? metricas.deuda_nominal_total ?? metricas.monto_total ?? 0
+  const deudaNominalTotal = metricas.deuda_nominal_total ?? metricas.monto_total ?? 0
+  const deudaInactiva = metricas.deuda_nominal_inactiva ?? (deudaNominalTotal - (metricas.deuda_nominal_activa ?? 0))
+  const totalPagadoHistorico = metricas.total_pagado ?? Math.max(0, deudaTotal - deudaActiva)
 
   return (
     <div className="grilla-kpis">
@@ -209,23 +211,30 @@ export function TarjetasKPI({ metricas = {}, alertas = {}, onFiltrarPlacas, onFi
         </div>
       </div>
 
-      {/* 4. Ahorro Global */}
+      {/* 4. Ahorro en Descuento */}
       <div className="tarjeta-kpi exito">
         <div className="tarjeta-kpi-cabecera">
           <span className="tarjeta-kpi-titulo" style={{ color: 'var(--color-exito)' }}>
-            Ahorro Global
+            Ahorro en Descuento
           </span>
           <div className="tarjeta-kpi-icono" style={{ color: 'var(--color-exito)', background: 'var(--color-exito-suave)' }}>
             <PiggyBank size={15} />
           </div>
         </div>
         <div className="tarjeta-kpi-valor" style={{ color: 'var(--color-exito)' }}>
-          {formatoMoneda(ahorroActivo)} <span className="tarjeta-kpi-subtexto" style={{ color: 'var(--color-exito)', opacity: 0.9, fontSize: '0.72rem' }}>en descuentos</span>
+          {formatoMoneda(ahorroActivo)} <span className="tarjeta-kpi-subtexto" style={{ color: 'var(--color-exito)', opacity: 0.9, fontSize: '0.72rem' }}>activo</span>
         </div>
         <div className="tarjeta-kpi-chips-fila">
-          <span className="chip-estado inactivo" title="Ahorro consolidado histórico de la flota">
-            Total: {formatoMoneda(ahorroTotal)}
-          </span>
+          <EtiquetaTooltip
+            texto={ahorroInactivo > 0 
+              ? `Ahorro total: reúne ${formatoMoneda(ahorroInactivo)} obtenidos en comparendos pagados y ${formatoMoneda(ahorroActivo)} en descuentos disponibles de comparendos activos.`
+              : `Ahorro total: suma todos los descuentos de ley vigentes en la flota (${formatoMoneda(ahorroActivo)}).`}
+            posicion="arriba"
+          >
+            <span className="chip-estado inactivo" style={{ cursor: 'help' }}>
+              Total: {formatoMoneda(ahorroTotal)}
+            </span>
+          </EtiquetaTooltip>
         </div>
       </div>
 
@@ -238,12 +247,17 @@ export function TarjetasKPI({ metricas = {}, alertas = {}, onFiltrarPlacas, onFi
           </div>
         </div>
         <div className="tarjeta-kpi-valor">
-          {formatoMoneda(deudaActiva)} <span className="tarjeta-kpi-subtexto" style={{ fontSize: '0.72rem' }}>activa</span>
+          {formatoMoneda(deudaActiva)} <span className="tarjeta-kpi-subtexto" style={{ fontSize: '0.72rem' }}>a pagar</span>
         </div>
         <div className="tarjeta-kpi-chips-fila">
-          <span className="chip-estado inactivo" title="Deuda acumulada total de la flota">
-            Total: {formatoMoneda(deudaTotal)}
-          </span>
+          <EtiquetaTooltip
+            texto={`Total acumulado: reúne ${formatoMoneda(totalPagadoHistorico)} que ya fueron pagados y ${formatoMoneda(deudaActiva)} pendientes por pagar.`}
+            posicion="arriba"
+          >
+            <span className="chip-estado inactivo" style={{ cursor: 'help' }}>
+              SIMIT: {formatoMoneda(deudaTotal)}
+            </span>
+          </EtiquetaTooltip>
         </div>
       </div>
     </div>

@@ -3,10 +3,11 @@ from fastapi.responses import StreamingResponse
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from sqlalchemy import select, func, or_
+from sqlalchemy.orm import joinedload
 
 from base_datos.conexion import obtener_sesion_bd
 from base_datos.modelos import ComparendoORM
-from plataforma_web.utilidades_exportacion import generar_excel_resumen, generar_excel_detallado
+from plataforma_web.utilidades_exportacion import generar_excel_resumen
 
 enrutador_comparendos = APIRouter(prefix="/api/comparendos", tags=["Comparendos"])
 
@@ -14,6 +15,7 @@ def serializar_comparendo(c: ComparendoORM) -> Dict[str, Any]:
     """
     Serializa un registro ORM de comparendo con todos los campos canónicos requeridos
     por la plataforma web (tabla, modales emergentes y notificaciones).
+    Aplica prevalencia del valor pagado real registrado en la gestión operativa (Paso 2).
     """
     tipo_str = str(c.tipo_registro or "").strip().lower()
     tiene_resolucion = bool(c.fecha_resolucion)
@@ -21,31 +23,74 @@ def serializar_comparendo(c: ComparendoORM) -> Dict[str, Any]:
     es_multa = (tipo_str == "multa") or tiene_resolucion or tiene_intereses
     es_foto = bool(c.es_fotodeteccion)
 
+    es_pagado = (c.estado_simit == "No activo") or (c.estado_simit == "Pagado")
+
+    # 1. Determinar etiqueta y límites teóricos de descuento
     if es_multa:
-        # Multa / Resolución en firme / Intereses causados: Tarifa plena 100% sin beneficio
         tag_desc = "Sin Descuento"
-        fecha_lim = "Vencido"
-        val_pagar = c.valor_total
+        fecha_lim = "Paz y Salvo" if es_pagado else "Vencido"
+        val_teorico = c.valor_total
     elif c.aplica_descuento_50:
-        if c.fecha_limite_descuento_50:
+        if es_pagado:
+            tag_desc = "50% Descuento"
+            fecha_lim = "Paz y Salvo"
+        elif c.fecha_limite_descuento_50:
             tag_desc = "50% Vigente"
             fecha_lim = str(c.fecha_limite_descuento_50)
         else:
             tag_desc = "50% (Sin Notificar)" if es_foto else "50% Vigente"
             fecha_lim = "Pendiente Notificación" if es_foto else "Vencido"
-        val_pagar = c.valor_con_descuento_50
+        val_teorico = c.valor_con_descuento_50
     elif c.aplica_descuento_25:
-        if c.fecha_limite_descuento_25:
+        if es_pagado:
+            tag_desc = "25% Descuento"
+            fecha_lim = "Paz y Salvo"
+        elif c.fecha_limite_descuento_25:
             tag_desc = "25% Vigente"
             fecha_lim = str(c.fecha_limite_descuento_25)
         else:
             tag_desc = "25% Vigente"
             fecha_lim = "Vencido"
-        val_pagar = c.valor_con_descuento_25
+        val_teorico = c.valor_con_descuento_25
     else:
         tag_desc = "Sin Descuento"
-        fecha_lim = "Vencido"
-        val_pagar = c.valor_total
+        fecha_lim = "Paz y Salvo" if es_pagado else "Vencido"
+        val_teorico = c.valor_total
+
+    # 2. Prevalencia: verificar si existe valor pagado real en la gestión operativa
+    g = getattr(c, "gestion_operativa", None)
+    if isinstance(g, list):
+        g = g[0] if g else None
+
+    val_pagado_real = None
+    if g and g.valor_pagado is not None and float(g.valor_pagado) > 0:
+        val_pagado_real = float(g.valor_pagado)
+
+    valor_total_simit = round(float(c.valor_total)) if c.valor_total else 0
+
+    if val_pagado_real is not None:
+        val_pagar = val_pagado_real
+        es_valor_real = True
+        # Alternativa 2: Si el valor pagado real supera el valor total nominal de SIMIT,
+        # el total se ajusta al valor real pagado para reflejar el monto total efectivo con recargo/mora,
+        # asegurando que el total nunca sea inferior a lo pagado.
+        if val_pagado_real > valor_total_simit:
+            valor_total_final = round(val_pagado_real)
+            tiene_recargo = True
+            recargo_mora = round(val_pagado_real - valor_total_simit)
+            ahorro_disp = 0.0
+        else:
+            valor_total_final = valor_total_simit
+            tiene_recargo = False
+            recargo_mora = 0
+            ahorro_disp = max(0.0, float(valor_total_simit - val_pagado_real))
+    else:
+        val_pagar = val_teorico
+        es_valor_real = False
+        valor_total_final = valor_total_simit
+        tiene_recargo = False
+        recargo_mora = 0
+        ahorro_disp = max(0.0, float(valor_total_simit - (val_teorico or 0))) if (val_teorico and valor_total_simit and not es_multa) else 0.0
 
     # Determinación legal de fecha de notificación para visualización
     if c.fecha_notificacion:
@@ -79,11 +124,16 @@ def serializar_comparendo(c: ComparendoORM) -> Dict[str, Any]:
         "fecha_resolucion": c.fecha_resolucion.strftime("%Y-%m-%d") if c.fecha_resolucion else None,
         "valor_nominal": round(float(c.valor)) if c.valor else 0,
         "intereses": round(float(c.intereses)) if c.intereses else 0,
-        "valor_total": round(float(c.valor_total)) if c.valor_total else 0,
+        "valor_total": valor_total_final,
+        "valor_total_simit": valor_total_simit,
+        "tiene_recargo_pago": tiene_recargo,
+        "recargo_mora": recargo_mora,
         "etiqueta_descuento": tag_desc,
         "fecha_limite_descuento": fecha_lim,
         "valor_a_pagar": round(float(val_pagar)) if val_pagar else 0,
-        "ahorro_disponible": round(float(c.valor_total - val_pagar)) if (val_pagar and c.valor_total and not es_multa) else 0,
+        "ahorro_disponible": round(float(ahorro_disp)),
+        "es_valor_real_pagado": es_valor_real,
+        "valor_pagado_gestion": round(float(val_pagado_real)) if val_pagado_real else None,
         "estado_simit": c.estado_simit
     }
 
@@ -100,7 +150,7 @@ def construir_consulta_filtrada(
     consulta = select(ComparendoORM)
 
     # 1. Filtro de búsqueda (admite término único o múltiples placas separadas por coma)
-    if busqueda and busqueda.strip():
+    if isinstance(busqueda, str) and busqueda.strip():
         partes = [p.strip() for p in busqueda.split(",") if p.strip()]
         if len(partes) > 1:
             condiciones = [ComparendoORM.placa.ilike(f"%{p}%") for p in partes]
@@ -119,7 +169,7 @@ def construir_consulta_filtrada(
             )
 
     # 2. Filtro de Estado SIMIT
-    if estado_simit and estado_simit.lower() != "todos":
+    if isinstance(estado_simit, str) and estado_simit.lower() != "todos":
         if estado_simit == "No activo":
             consulta = consulta.where(
                 or_(
@@ -131,15 +181,16 @@ def construir_consulta_filtrada(
             consulta = consulta.where(ComparendoORM.estado_simit == estado_simit)
 
     # 3. Filtro de Descuentos
-    if filtro_descuento == "50":
-        consulta = consulta.where(ComparendoORM.aplica_descuento_50 == True)
-    elif filtro_descuento == "25":
-        consulta = consulta.where(ComparendoORM.aplica_descuento_25 == True)
-    elif filtro_descuento == "sin_descuento":
-        consulta = consulta.where(
-            ComparendoORM.aplica_descuento_50 == False,
-            ComparendoORM.aplica_descuento_25 == False
-        )
+    if isinstance(filtro_descuento, str):
+        if filtro_descuento == "50":
+            consulta = consulta.where(ComparendoORM.aplica_descuento_50 == True)
+        elif filtro_descuento == "25":
+            consulta = consulta.where(ComparendoORM.aplica_descuento_25 == True)
+        elif filtro_descuento == "sin_descuento":
+            consulta = consulta.where(
+                ComparendoORM.aplica_descuento_50 == False,
+                ComparendoORM.aplica_descuento_25 == False
+            )
 
     return consulta
 
@@ -156,26 +207,38 @@ def listar_comparendos(
     Retorna la lista paginada de comparendos con filtros en tiempo real y soporte para
     personalización de registros por página (5, 10, 20, 50 o personalizado).
     """
+    pagina_num = pagina if isinstance(pagina, int) else 1
+    limite_num = limite if isinstance(limite, int) else 5
+    busqueda_str = busqueda if isinstance(busqueda, str) else None
+    estado_str = estado_simit if isinstance(estado_simit, str) else "todos"
+    filtro_desc_str = filtro_descuento if isinstance(filtro_descuento, str) else "todos"
+
     try:
         with obtener_sesion_bd() as sesion:
-            consulta = construir_consulta_filtrada(busqueda, estado_simit, filtro_descuento)
+            consulta = construir_consulta_filtrada(busqueda_str, estado_str, filtro_desc_str)
 
             # Conteo total para paginación
             conteo_stmt = select(func.count()).select_from(consulta.subquery())
             total_registros = sesion.execute(conteo_stmt).scalar() or 0
 
-            # Aplicar ordenamiento y paginación
-            desplazamiento = (pagina - 1) * limite
-            consulta = consulta.order_by(ComparendoORM.fecha_infraccion.desc().nullslast()).offset(desplazamiento).limit(limite)
+            # Aplicar ordenamiento, relación con gestión operativa y paginación
+            desplazamiento = (pagina_num - 1) * limite_num
+            consulta = (
+                consulta
+                .options(joinedload(ComparendoORM.gestion_operativa))
+                .order_by(ComparendoORM.fecha_infraccion.desc().nullslast())
+                .offset(desplazamiento)
+                .limit(limite_num)
+            )
 
-            registros = sesion.scalars(consulta).all()
+            registros = sesion.scalars(consulta).unique().all()
             lista = [serializar_comparendo(c) for c in registros]
-            total_paginas = (total_registros + limite - 1) // limite if total_registros > 0 else 1
+            total_paginas = (total_registros + limite_num - 1) // limite_num if total_registros > 0 else 1
 
             return {
                 "exitoso": True,
-                "pagina_actual": pagina,
-                "limite_por_pagina": limite,
+                "pagina_actual": pagina_num,
+                "limite_por_pagina": limite_num,
                 "total_registros": total_registros,
                 "total_paginas": total_paginas,
                 "comparendos": lista
@@ -184,27 +247,28 @@ def listar_comparendos(
         raise HTTPException(status_code=500, detail=f"Error al listar comparendos: {str(e)}")
 
 
+@enrutador_comparendos.get("/exportar/excel")
 @enrutador_comparendos.get("/exportar/resumen")
-def exportar_comparendos_resumen(
-    busqueda: Optional[str] = Query(None, description="Búsqueda activa"),
-    estado_simit: Optional[str] = Query("todos", description="Estado SIMIT filtrado"),
-    filtro_descuento: Optional[str] = Query("todos", description="Descuento filtrado")
-):
+@enrutador_comparendos.get("/exportar/detallado")
+def exportar_comparendos_excel():
     """
-    Genera y descarga un archivo Excel (.xlsx) con el reporte ejecutivo y operativo resumido.
-    Respeta los filtros activos en la vista de la tabla.
+    Genera y descarga el archivo Excel (.xlsx) oficial y consolidado de comparendos.
+    Exporta SIEMPRE el 100% de los datos registrados en la base de datos sin aplicar filtros de vista.
     """
     try:
         with obtener_sesion_bd() as sesion:
-            consulta = construir_consulta_filtrada(busqueda, estado_simit, filtro_descuento)
-            consulta = consulta.order_by(ComparendoORM.fecha_infraccion.desc().nullslast())
-            registros = sesion.scalars(consulta).all()
+            consulta = (
+                select(ComparendoORM)
+                .options(joinedload(ComparendoORM.gestion_operativa))
+                .order_by(ComparendoORM.fecha_infraccion.desc().nullslast())
+            )
+            registros = sesion.scalars(consulta).unique().all()
 
             lista_serializada = [serializar_comparendo(c) for c in registros]
             buffer_excel = generar_excel_resumen(lista_serializada)
 
             marca_tiempo = datetime.now().strftime("%Y%m%d_%H%M%S")
-            nombre_descarga = f"reporte_comparendos_resumen_{marca_tiempo}.xlsx"
+            nombre_descarga = f"reporte_comparendos_{marca_tiempo}.xlsx"
 
             return StreamingResponse(
                 buffer_excel,
@@ -215,39 +279,5 @@ def exportar_comparendos_resumen(
                 }
             )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al generar reporte Excel resumen: {str(e)}")
-
-
-@enrutador_comparendos.get("/exportar/detallado")
-def exportar_comparendos_detallado(
-    busqueda: Optional[str] = Query(None, description="Búsqueda activa"),
-    estado_simit: Optional[str] = Query("todos", description="Estado SIMIT filtrado"),
-    filtro_descuento: Optional[str] = Query("todos", description="Descuento filtrado")
-):
-    """
-    Genera y descarga un archivo Excel (.xlsx) exhaustivo con toda la información técnica,
-    jurídica y operativa de los comparendos y multas.
-    """
-    try:
-        with obtener_sesion_bd() as sesion:
-            consulta = construir_consulta_filtrada(busqueda, estado_simit, filtro_descuento)
-            consulta = consulta.order_by(ComparendoORM.fecha_infraccion.desc().nullslast())
-            registros = sesion.scalars(consulta).all()
-
-            lista_serializada = [serializar_comparendo(c) for c in registros]
-            buffer_excel = generar_excel_detallado(lista_serializada)
-
-            marca_tiempo = datetime.now().strftime("%Y%m%d_%H%M%S")
-            nombre_descarga = f"reporte_comparendos_detallado_{marca_tiempo}.xlsx"
-
-            return StreamingResponse(
-                buffer_excel,
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={
-                    "Content-Disposition": f'attachment; filename="{nombre_descarga}"',
-                    "Access-Control-Expose-Headers": "Content-Disposition"
-                }
-            )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al generar reporte Excel detallado: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al generar reporte Excel: {str(e)}")
 

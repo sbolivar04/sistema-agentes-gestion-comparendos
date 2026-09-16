@@ -12,6 +12,7 @@ from plataforma_web.rutas_api.chat import enrutador_chat
 from plataforma_web.rutas_api.extraccion import enrutador_extraccion
 from plataforma_web.rutas_api.entidades import enrutador_entidades
 from plataforma_web.rutas_api.programacion import enrutador_programacion
+from plataforma_web.rutas_api.gestiones_operativas import enrutador_gestiones_operativas
 
 # Version 1.0.3 - Programacion y horario dinamico desde cron.job
 app = FastAPI(
@@ -37,6 +38,7 @@ app.include_router(enrutador_chat)
 app.include_router(enrutador_extraccion)
 app.include_router(enrutador_entidades)
 app.include_router(enrutador_programacion)
+app.include_router(enrutador_gestiones_operativas)
 
 DIRECTORIO_RAIZ = Path(__file__).resolve().parent
 DIRECTORIO_DIST_CLIENTE = DIRECTORIO_RAIZ / "cliente" / "dist"

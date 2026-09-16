@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
-import { Search, Filter, ChevronLeft, ChevronRight, Eye, SlidersHorizontal, X, Percent, FolderKanban } from 'lucide-react'
+import { Search, Filter, ChevronLeft, ChevronRight, Eye, SlidersHorizontal, X, Percent, FolderKanban, CheckCircle2, Sparkles, Tag } from 'lucide-react'
 import { apiBackend } from '../servicios/apiBackend'
 import { useFlota } from '../contexto/ContextoFlota'
 import { ModalDetalleComparendo } from './ModalDetalleComparendo'
@@ -15,7 +15,7 @@ export function TablaComparendos({
   filtroEstadoExterno = null,
   versionFiltroEstadoExterno = 0
 }) {
-  const { comparendos: todosComparendos, cargandoComparendos: cargando, cargarComparendos } = useFlota()
+  const { comparendos: todosComparendos, cargandoComparendos: cargando, cargarComparendos, cargarKPIs } = useFlota()
   const [paginaActual, setPaginaActual] = useState(1)
 
   // Paginación por defecto en 5
@@ -30,8 +30,42 @@ export function TablaComparendos({
   const [comparendoSeleccionado, setComparendoSeleccionado] = useState(null)
   const [comparendoGestion, setComparendoGestion] = useState(null)
 
+  // Mapa de gestiones operativas sincronizadas directamente desde Supabase PostgreSQL
+  const [mapaGestiones, setMapaGestiones] = useState({})
+
   // Versión reactiva para refrescar de inmediato el micro-indicador del botón al guardar en el modal
   const [versionGestion, setVersionGestion] = useState(0)
+
+  // Limpieza inicial de cualquier dato residual de prueba anterior en localStorage
+  useEffect(() => {
+    try {
+      const llavesABorrar = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (k && k.startsWith('gestion_operativa_')) {
+          llavesABorrar.push(k)
+        }
+      }
+      llavesABorrar.forEach(k => localStorage.removeItem(k))
+    } catch (e) {
+      console.warn('Error al limpiar localStorage residual:', e)
+    }
+  }, [])
+
+  // Cargar mapa de gestiones operativas desde Supabase
+  useEffect(() => {
+    let activo = true
+    apiBackend.obtenerMapaGestiones()
+      .then((res) => {
+        if (activo && res?.exitoso && res.gestiones) {
+          setMapaGestiones(res.gestiones)
+        }
+      })
+      .catch((err) => {
+        console.warn('Error al cargar mapa de gestiones desde Supabase:', err)
+      })
+    return () => { activo = false }
+  }, [versionGestion])
 
   // Obtener subestado operativo y color del micro-indicador para el botón de gestión
   const obtenerSubestadoGestion = (c) => {
@@ -44,8 +78,10 @@ export function TablaComparendos({
     }
 
     try {
-      const raw = localStorage.getItem(`gestion_operativa_${c.id}`)
-      if (!raw) {
+      // Única fuente de verdad: registro sincronizado desde Supabase PostgreSQL
+      const datos = mapaGestiones[c.id]
+
+      if (!datos) {
         if (c.estado_simit === 'No activo' || c.estado_simit === 'Pagado') {
           return {
             colorCodigo: 'verde',
@@ -60,17 +96,15 @@ export function TablaComparendos({
         }
       }
 
-      const datos = JSON.parse(raw)
-
       // Verificación estricta de Paso 1 completo:
       // Requiere nombre, cédula, asignación de pago y ambos soportes obligatorios (correo y autorización firmada)
       const paso1Completo = Boolean(
-        (datos.paso1Completo === true) || (
-          datos.responsableNombre && datos.responsableNombre.trim().length > 0 &&
-          datos.responsableDocumento && String(datos.responsableDocumento).replace(/\D/g, '').length > 0 &&
-          datos.distribucionPago &&
-          datos.soporteCorreo &&
-          datos.soporteFirma
+        (datos.paso1Completo === true || datos.paso1_completo === true) || (
+          (datos.responsableNombre || datos.responsable_nombre)?.trim()?.length > 0 &&
+          String(datos.responsableDocumento || datos.responsable_documento || '').replace(/\D/g, '').length > 0 &&
+          (datos.distribucionPago || datos.distribucion_pago) &&
+          (datos.soporteCorreo || datos.soporte_correo || datos.tiene_soporte_correo) &&
+          (datos.soporteFirma || datos.soporte_firma || datos.tiene_soporte_firma)
         )
       )
 
@@ -78,10 +112,11 @@ export function TablaComparendos({
       // Requiere Paso 1 completo + valor pagado registrado + fecha de pago + factura/recibo oficial adjunto
       const paso2Completo = Boolean(
         paso1Completo && (
-          (datos.paso2Completo === true) || (
-            datos.valorPagado && Number(String(datos.valorPagado).replace(/\D/g, '')) > 0 &&
-            datos.fechaPago &&
-            datos.soporteFactura
+          (datos.paso2Completo === true || datos.paso2_completo === true) || (
+            (datos.valorPagado || datos.valor_pagado) && 
+            Number(String(datos.valorPagado || datos.valor_pagado).replace(/\D/g, '')) > 0 &&
+            (datos.fechaPago || datos.fecha_pago) &&
+            (datos.soporteFactura || datos.soporte_factura || datos.tiene_soporte_factura)
           )
         )
       )
@@ -89,22 +124,32 @@ export function TablaComparendos({
       // Verificación de Paso 3 completo (Descargue SIMIT / Paz y Salvo)
       const paso3Completo = Boolean(
         datos.confirmadoDescargueSimit ||
+        datos.confirmado_descargue_simit ||
         datos.subestadoCodigo === 'descargado_paz_y_salvo' ||
+        datos.subestado_codigo === 'descargado_paz_y_salvo' ||
         c.estado_simit === 'No activo' ||
         c.estado_simit === 'Pagado'
       )
 
+      const faseActualNum = Number(datos.faseActual || datos.fase_actual || 1)
+      const subestadoCod = datos.subestadoCodigo || datos.subestado_codigo || 'sin_gestion'
+      const nombreResp = (datos.responsableNombre || datos.responsable_nombre || '').trim()
+      const docResp = String(datos.responsableDocumento || datos.responsable_documento || '').replace(/\D/g, '').trim()
+      const distPago = datos.distribucionPago || datos.distribucion_pago
+      const tieneSoporte1 = Boolean(
+        datos.soporteCorreo || datos.soporte_correo || datos.tiene_soporte_correo ||
+        datos.soporteFirma || datos.soporte_firma || datos.tiene_soporte_firma
+      )
+
       // Verificación de si ha iniciado o digitado cualquier información del Paso 1
       const tieneAlgoPaso1 = Boolean(
-        (datos.responsableNombre && datos.responsableNombre.trim().length > 0) ||
-        (datos.responsableDocumento && String(datos.responsableDocumento).replace(/\D/g, '').length > 0) ||
-        datos.distribucionPago ||
-        datos.observacionesAsignacion ||
-        datos.soporteCorreo ||
-        datos.soporteFirma ||
-        datos.subestadoCodigo === 'identificacion' ||
-        datos.subestadoCodigo === 'revision_aprobacion' ||
-        datos.faseActual === 1
+        nombreResp.length > 0 ||
+        docResp.length > 0 ||
+        (distPago && String(distPago).trim().length > 0) ||
+        (datos.observacionesAsignacion && String(datos.observacionesAsignacion).trim().length > 0) ||
+        (datos.observaciones_asignacion && String(datos.observaciones_asignacion).trim().length > 0) ||
+        tieneSoporte1 ||
+        subestadoCod === 'revision_aprobacion'
       )
 
       // 1. VERDE: Paz y Salvo Oficial (Cuando pasa a estado No activo o Pagado en SIMIT)
@@ -117,8 +162,7 @@ export function TablaComparendos({
       }
 
       // 2. NARANJA: Paso 3 activo (Comparendo pagado físicamente, en espera de descargue SIMIT)
-      // Muestra el punto del mismo color naranja (#ea580c) que el subestado operativo
-      if (datos.faseActual === 3 || datos.subestadoCodigo === 'pagado_esperando_descargue') {
+      if (faseActualNum === 3 || subestadoCod === 'pagado_esperando_descargue') {
         return {
           colorCodigo: 'naranja',
           etiqueta: 'Pagado • Esperando Descargue SIMIT',
@@ -127,9 +171,11 @@ export function TablaComparendos({
       }
 
       // 3. AMARILLO: Paso 2 activo o Paso 1 completado (En trámite de pago)
-      // Permanece en amarillo durante todo el registro del Paso 2 (incluyendo fecha y valor) hasta avanzar al Paso 3
-      if (datos.faseActual === 2 || paso1Completo) {
-        const montoTexto = (datos.fechaPago && datos.valorPagado) ? ` ($${datos.valorPagado})` : ''
+      if (faseActualNum === 2 || paso1Completo) {
+        const valNum = datos.valorPagado || datos.valor_pagado
+        const montoTexto = (datos.fechaPago || datos.fecha_pago) && valNum 
+          ? ` ($${Number(String(valNum).replace(/\D/g, '')).toLocaleString('es-CO')})` 
+          : ''
         return {
           colorCodigo: 'amarillo',
           etiqueta: 'Fase 2: En Trámite de Pago',
@@ -137,16 +183,14 @@ export function TablaComparendos({
         }
       }
 
-      // 3. AZUL: Paso 1 iniciado o en progreso (incompleto)
+      // 4. AZUL: Paso 1 iniciado o en progreso (incompleto)
       if (tieneAlgoPaso1) {
         let detalleFase1 = 'En asignación de conductor'
-        const nombreResp = datos.responsableNombre?.trim()
-
-        if (nombreResp && (datos.soporteCorreo || datos.soporteFirma)) {
+        if (nombreResp && tieneSoporte1) {
           detalleFase1 = `En revisión de firmas (${nombreResp.split(' ')[0]})`
         } else if (nombreResp) {
           detalleFase1 = `En asignación (${nombreResp.split(' ')[0]})`
-        } else if (datos.distribucionPago) {
+        } else if (distPago) {
           detalleFase1 = 'En asignación de responsabilidad'
         }
 
@@ -157,7 +201,7 @@ export function TablaComparendos({
         }
       }
 
-      // 4. GRIS: Sin gestión iniciada
+      // 5. GRIS: Sin gestión iniciada
       return {
         colorCodigo: 'gris',
         etiqueta: 'Sin gestión',
@@ -199,7 +243,13 @@ export function TablaComparendos({
   // Generar texto descriptivo de vigencia para el tooltip de la columna Descuento
   const obtenerTextoTooltipDescuento = (c) => {
     if (c.estado_simit !== 'Activo') {
-      return 'Comparendo pagado • Paz y salvo'
+      if (c.etiqueta_descuento?.includes('50')) {
+        return 'Comparendo pagado con 50% de descuento legal • Paz y salvo'
+      }
+      if (c.etiqueta_descuento?.includes('25')) {
+        return 'Comparendo pagado con 25% de descuento legal • Paz y salvo'
+      }
+      return 'Comparendo pagado a tarifa plena • Paz y salvo'
     }
     if (c.fecha_limite_descuento === 'Pendiente Notificación' || c.etiqueta_descuento?.includes('Sin Notificar')) {
       return 'Términos no iniciados (11 días hábiles de ley al ser notificado)'
@@ -208,6 +258,31 @@ export function TablaComparendos({
       return 'Plazo de descuento vencido • Tarifa plena'
     }
     return `Descuento vigente hasta el ${formatearFecha(c.fecha_limite_descuento)}`
+  }
+
+  // Renderizar el valor a pagar con el distintivo definitivo "✓ Real pagado" (Opción 3 elegida)
+  const renderizarDistintivoPagoReal = (valor, esReal) => {
+    const textoValor = `$${Math.round(Number(valor || 0)).toLocaleString('es-CO')}`
+    if (!esReal) {
+      return textoValor
+    }
+
+    return (
+      <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.25 }}>
+        <span>{textoValor}</span>
+        <span style={{
+          fontSize: '0.67rem',
+          fontWeight: 600,
+          color: '#059669',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.2rem',
+          marginTop: '2px'
+        }}>
+          ✓ Real pagado
+        </span>
+      </div>
+    )
   }
 
   // Asegurar carga de comparendos al montar (usa caché global en memoria si ya existen)
@@ -466,13 +541,7 @@ export function TablaComparendos({
             posicionAlineacion="derecha"
           />
 
-          <BotonExportarExcel
-            busqueda={busqueda}
-            filtroEstado={filtroEstado}
-            filtroDescuento={filtroDescuento}
-            totalRegistros={comparendosFiltrados.length}
-            deshabilitado={cargando}
-          />
+          <BotonExportarExcel deshabilitado={cargando} />
         </div>
       </div>
 
@@ -497,7 +566,7 @@ export function TablaComparendos({
             {cargando ? (
               <tr>
                 <td colSpan="10" style={{ textAlign: 'center', padding: '2rem' }}>
-                  Cargando comparendos desde Supabase...
+                  Cargando comparendos...
                 </td>
               </tr>
             ) : comparendosFiltrados.length === 0 ? (
@@ -510,8 +579,42 @@ export function TablaComparendos({
               comparendosPaginados.map((c) => {
                 const subestadoInfo = obtenerSubestadoGestion(c)
 
+                // Prevalencia reactiva del valor real pagado en la gestión operativa (Paso 2)
+                const gestionFila = mapaGestiones[c.id]
+                const valPagadoGestion = gestionFila?.valor_pagado ?? gestionFila?.valorPagado
+                const tienePagoReal = (valPagadoGestion !== undefined && valPagadoGestion !== null && Number(String(valPagadoGestion).replace(/\D/g, '')) > 0) || Boolean(c.es_valor_real_pagado)
+                const esRealVisual = tienePagoReal
+
+                const valorAPagarFinal = (valPagadoGestion !== undefined && valPagadoGestion !== null && Number(String(valPagadoGestion).replace(/\D/g, '')) > 0)
+                  ? Number(String(valPagadoGestion).replace(/\D/g, ''))
+                  : (c.valor_a_pagar || 0)
+
+                const valorSimitBase = Number(c.valor_total_simit ?? c.valor_total ?? 0)
+
+                // Alternativa 2:
+                // Si el valor pagado real supera el valor total nominal de SIMIT,
+                // el valor total se ajusta al valor pagado para reflejar el total efectivo (con mora/recargo)
+                const tieneRecargo = tienePagoReal && valorAPagarFinal > valorSimitBase
+                const valorTotalFinal = tieneRecargo ? valorAPagarFinal : Number(c.valor_total || valorSimitBase)
+                const recargoMora = tieneRecargo ? (valorAPagarFinal - valorSimitBase) : (c.recargo_mora || 0)
+
+                const ahorroDisponibleFinal = tienePagoReal
+                  ? Math.max(0, valorTotalFinal - valorAPagarFinal)
+                  : (c.ahorro_disponible || 0)
+
+                const comparendoEnriquecido = {
+                  ...c,
+                  valor_total: valorTotalFinal,
+                  valor_total_simit: valorSimitBase,
+                  tiene_recargo_pago: tieneRecargo,
+                  recargo_mora: recargoMora,
+                  valor_a_pagar: valorAPagarFinal,
+                  ahorro_disponible: ahorroDisponibleFinal,
+                  es_valor_real_pagado: tienePagoReal
+                }
+
                 return (
-                  <tr key={c.id} onClick={() => setComparendoSeleccionado(c)} style={{ cursor: 'pointer' }}>
+                  <tr key={c.id} onClick={() => setComparendoSeleccionado(comparendoEnriquecido)} style={{ cursor: 'pointer' }}>
                     <td>
                       <span className="placa-badge">{c.placa}</span>
                     </td>
@@ -537,7 +640,7 @@ export function TablaComparendos({
                       <EtiquetaTooltip texto={c.descripcion_infraccion || `Infracción código ${c.codigo_infraccion}`}>
                         <strong
                           style={{
-                            color: 'var(--color-primario)',
+                              color: 'var(--color-primario)',
                             cursor: 'help',
                             display: 'inline-block',
                             textDecoration: 'underline dotted',
@@ -549,7 +652,18 @@ export function TablaComparendos({
                       </EtiquetaTooltip>
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      ${Math.round(Number(c.valor_total || 0)).toLocaleString('es-CO')}
+                      {tieneRecargo ? (
+                        <EtiquetaTooltip
+                          texto={`Total ajustado con recargo/mora de +$${recargoMora.toLocaleString('es-CO')} sobre la base SIMIT ($${valorSimitBase.toLocaleString('es-CO')})`}
+                          posicion="arriba"
+                        >
+                          <span style={{ cursor: 'help', borderBottom: '1px dotted var(--texto-secundario)' }}>
+                            ${Math.round(valorTotalFinal).toLocaleString('es-CO')}
+                          </span>
+                        </EtiquetaTooltip>
+                      ) : (
+                        `$${Math.round(valorTotalFinal).toLocaleString('es-CO')}`
+                      )}
                     </td>
                     <td>
                       <EtiquetaTooltip texto={obtenerTextoTooltipDescuento(c)} posicion="arriba">
@@ -561,8 +675,8 @@ export function TablaComparendos({
                         </span>
                       </EtiquetaTooltip>
                     </td>
-                    <td style={{ fontWeight: 700, color: c.ahorro_disponible > 0 ? 'var(--color-exito)' : 'inherit', whiteSpace: 'nowrap' }}>
-                      ${Math.round(Number(c.valor_a_pagar || 0)).toLocaleString('es-CO')}
+                    <td style={{ fontWeight: 700, color: ahorroDisponibleFinal > 0 ? 'var(--color-exito)' : 'inherit', whiteSpace: 'nowrap' }}>
+                      {renderizarDistintivoPagoReal(valorAPagarFinal, esRealVisual)}
                     </td>
                     <td>
                       <span className={`chip-estado ${c.estado_simit === 'Activo' ? 'activo' : 'inactivo'}`}>
@@ -575,7 +689,7 @@ export function TablaComparendos({
                           <button
                             className="boton-icono boton-icono-gestion"
                             style={{ width: '32px', height: '32px' }}
-                            onClick={(e) => { e.stopPropagation(); setComparendoGestion(c); }}
+                            onClick={(e) => { e.stopPropagation(); setComparendoGestion(comparendoEnriquecido); }}
                             aria-label={subestadoInfo.tooltip}
                           >
                             <FolderKanban size={15} />
@@ -589,7 +703,7 @@ export function TablaComparendos({
                           <button
                             className="boton-icono"
                             style={{ width: '32px', height: '32px' }}
-                            onClick={(e) => { e.stopPropagation(); setComparendoSeleccionado(c); }}
+                            onClick={(e) => { e.stopPropagation(); setComparendoSeleccionado(comparendoEnriquecido); }}
                             aria-label="Ver detalle legal"
                           >
                             <Eye size={15} />
@@ -684,12 +798,20 @@ export function TablaComparendos({
       {comparendoGestion && (
         <ModalGestionOperativa
           comparendo={comparendoGestion}
-          alCerrar={() => {
-            setComparendoGestion(null)
+          gestionInicial={mapaGestiones[comparendoGestion.id]}
+          alCerrar={() => setComparendoGestion(null)}
+          alActualizarGestion={(comparendoId, nuevaGestion) => {
             setVersionGestion(v => v + 1)
-          }}
-          alActualizarGestion={() => {
-            setVersionGestion(v => v + 1)
+            if (comparendoId && nuevaGestion) {
+              setMapaGestiones(prev => ({
+                ...prev,
+                [comparendoId]: nuevaGestion
+              }))
+            }
+            // Refrescar KPIs ejecutivos (Ahorro en Descuento y Deuda Pendiente) de inmediato
+            if (cargarKPIs) {
+              cargarKPIs()
+            }
           }}
         />
       )}

@@ -25,6 +25,7 @@ class Configuracion(BaseSettings):
     DATABASE_URL: str = ""
     DB_SCHEMA: str = "comparendos_fscr"
     SUPABASE_URL: str = ""
+    SUPABASE_ANON_KEY: str = ""
     GEMINI_API_KEY: str = ""
     MODELO_GEMINI: str = "gemini-3.8-flash"
     

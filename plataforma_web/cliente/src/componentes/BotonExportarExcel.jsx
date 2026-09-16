@@ -1,24 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Download, FileSpreadsheet, ChevronDown, Check, Loader2, TableProperties, Layers } from 'lucide-react'
+import { FileSpreadsheet, ChevronDown, Loader2, TableProperties } from 'lucide-react'
 
 /**
  * Componente BotonExportarExcel
- * Permite descargar la información de comparendos en formato Excel (.xlsx).
- * Ofrece dos modalidades:
- * 1. Exporte Resumen (gestión operativa y liquidación)
- * 2. Exporte Detallado (auditoría técnica y jurídica completa)
+ * Botón desplegable modular preparado para escalar con nuevos formatos en el futuro.
+ * Actualmente ofrece el reporte oficial consolidado en formato Excel (.xlsx).
  */
 export function BotonExportarExcel({
-  busqueda = '',
-  filtroEstado = 'todos',
-  filtroDescuento = 'todos',
-  totalRegistros = 0,
   deshabilitado = false
 }) {
   const [estaAbierto, setEstaAbierto] = useState(false)
   const [descargando, setDescargando] = useState(false)
-  const [tipoDescargando, setTipoDescargando] = useState(null)
   const [estiloPosicion, setEstiloPosicion] = useState({})
 
   const refBoton = useRef(null)
@@ -80,27 +73,13 @@ export function BotonExportarExcel({
     }
   }, [estaAbierto])
 
-  const ejecutarDescarga = (tipo) => {
+  const ejecutarDescarga = () => {
     setEstaAbierto(false)
     setDescargando(true)
-    setTipoDescargando(tipo)
 
     try {
-      const parametros = new URLSearchParams()
-      if (busqueda && busqueda.trim()) {
-        parametros.append('busqueda', busqueda.trim())
-      }
-      if (filtroEstado && filtroEstado !== 'todos') {
-        parametros.append('estado_simit', filtroEstado)
-      }
-      if (filtroDescuento && filtroDescuento !== 'todos') {
-        parametros.append('filtro_descuento', filtroDescuento)
-      }
+      const url = '/api/comparendos/exportar/excel'
 
-      const queryString = parametros.toString()
-      const url = `/api/comparendos/exportar/${tipo}${queryString ? `?${queryString}` : ''}`
-
-      // Crear enlace de descarga automático
       const enlace = document.createElement('a')
       enlace.href = url
       enlace.setAttribute('download', '')
@@ -112,8 +91,7 @@ export function BotonExportarExcel({
     } finally {
       setTimeout(() => {
         setDescargando(false)
-        setTipoDescargando(null)
-      }, 1800)
+      }, 1500)
     }
   }
 
@@ -124,8 +102,8 @@ export function BotonExportarExcel({
         type="button"
         className={`boton-exportar-excel ${estaAbierto ? 'activo' : ''} ${descargando ? 'cargando' : ''}`}
         onClick={() => !deshabilitado && !descargando && setEstaAbierto(!estaAbierto)}
-        disabled={deshabilitado || totalRegistros === 0}
-        title={totalRegistros === 0 ? 'No hay registros para exportar' : 'Exportar comparendos a Excel (.xlsx)'}
+        disabled={deshabilitado}
+        title="Exportar comparendos a Excel (.xlsx)"
       >
         {descargando ? (
           <Loader2 size={15} className="icono-girando" style={{ color: '#10b981' }} />
@@ -143,43 +121,23 @@ export function BotonExportarExcel({
           <div ref={refMenu} className="menu-exportar-excel" style={estiloPosicion}>
             <div className="menu-exportar-encabezado">
               <span>FORMATOS DISPONIBLES (.XLSX)</span>
-              <span className="conteo-registros-export">{totalRegistros} reg.</span>
             </div>
 
             <button
               type="button"
               className="opcion-exportar"
-              onClick={() => ejecutarDescarga('resumen')}
+              onClick={ejecutarDescarga}
             >
               <div className="opcion-exportar-icono-wrap icono-resumen">
                 <TableProperties size={18} />
               </div>
               <div className="opcion-exportar-contenido">
                 <div className="opcion-exportar-titulo-linea">
-                  <span className="opcion-exportar-titulo">Exporte Resumen</span>
-                  <span className="badge-exportar badge-verde">Recomendado</span>
+                  <span className="opcion-exportar-titulo">Exporte Comparendos</span>
+                  <span className="badge-exportar badge-verde">Oficial</span>
                 </div>
                 <p className="opcion-exportar-desc">
-                  Columnas clave de gestión operativa, descuentos de ley y liquidación.
-                </p>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              className="opcion-exportar"
-              onClick={() => ejecutarDescarga('detallado')}
-            >
-              <div className="opcion-exportar-icono-wrap icono-detallado">
-                <Layers size={18} />
-              </div>
-              <div className="opcion-exportar-contenido">
-                <div className="opcion-exportar-titulo-linea">
-                  <span className="opcion-exportar-titulo">Exporte Detallado</span>
-                  <span className="badge-exportar badge-azul">Auditoría</span>
-                </div>
-                <p className="opcion-exportar-desc">
-                  Información técnica y jurídica completa con direcciones y fuentes.
+                  Consolidado completo con fotodetección, valor base, fechas y liquidación.
                 </p>
               </div>
             </button>

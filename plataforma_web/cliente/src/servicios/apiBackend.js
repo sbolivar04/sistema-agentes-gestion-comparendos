@@ -114,5 +114,39 @@ export const apiBackend = {
       body: JSON.stringify(datos)
     })
     return await res.json()
+  },
+
+  // ==========================================
+  // GESTIÓN OPERATIVA EN SUPABASE (POSTGRESQL)
+  // ==========================================
+  async obtenerMapaGestiones() {
+    const res = await fetch(`${API_BASE}/gestiones`)
+    return await res.json()
+  },
+
+  async obtenerGestionComparendo(comparendoId) {
+    const res = await fetch(`${API_BASE}/gestiones/${comparendoId}`)
+    return await res.json()
+  },
+
+  async guardarGestionComparendo(comparendoId, datos) {
+    const res = await fetch(`${API_BASE}/gestiones/${comparendoId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(datos)
+    })
+    return await res.json()
+  },
+
+  async obtenerConfiguracionStorage() {
+    const res = await fetch(`${API_BASE}/gestiones/configuracion-storage`)
+    return await res.json()
+  },
+
+  async eliminarSoporteGestion(comparendoId, tipoSoporte) {
+    const res = await fetch(`${API_BASE}/gestiones/${comparendoId}/soporte/${tipoSoporte}`, {
+      method: 'DELETE'
+    })
+    return await res.json()
   }
 }

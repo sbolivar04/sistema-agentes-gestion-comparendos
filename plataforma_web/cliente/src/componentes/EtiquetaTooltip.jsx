@@ -247,7 +247,7 @@ export function EtiquetaTooltip({
           }}
           role="tooltip"
         >
-          <span>{texto}</span>
+          <span>{typeof texto === 'string' ? texto.replace(/\$\s*/g, '$') : texto}</span>
           <div 
             className="etiqueta-tooltip-flecha" 
             style={

@@ -1,8 +1,9 @@
 from datetime import datetime, date
 from typing import Optional
 from sqlalchemy import (
-    String, Float, Boolean, DateTime, Date, Integer, Text, ForeignKey, Index
+    String, Float, Boolean, DateTime, Date, Integer, Text, ForeignKey, Index, Numeric
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from configuracion import configuracion
 
@@ -55,6 +56,11 @@ class ComparendoORM(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
+    # Relación 1 a 1 con la gestión operativa
+    gestion_operativa: Mapped[Optional["GestionOperativaORM"]] = relationship(
+        "GestionOperativaORM", back_populates="comparendo", uselist=False
+    )
+
 class LogExtraccionORM(Base):
     __tablename__ = "logs_extraccion"
 
@@ -90,3 +96,54 @@ class EntidadConsultaORM(Base):
 
 # Alias de compatibilidad
 PreferenciaConsultaORM = EntidadConsultaORM
+
+
+class GestionOperativaORM(Base):
+    """
+    Modelo ORM para almacenar la trazabilidad y los datos diligenciados en la gestión operativa
+    de cada comparendo (asignación, pagos, soportes documentales y estado de descargue).
+    """
+    __tablename__ = "gestiones_operativas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    comparendo_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(f"{configuracion.DB_SCHEMA}.comparendos.id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+        nullable=False
+    )
+
+    # Paso 1: Asignación y Firmas
+    responsable_nombre: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    responsable_documento: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    distribucion_pago: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    observaciones_asignacion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    soporte_correo: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    soporte_firma: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+    # Paso 2: Pago y Facturación
+    valor_pagado: Mapped[Optional[float]] = mapped_column(Numeric(14, 2), nullable=True)
+    fecha_pago: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    soporte_factura: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    soporte_curso_vial: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+    # Paso 3: Descargue SIMIT
+    confirmado_descargue_simit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    fecha_confirmacion_simit: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Control Operativo (Semáforo de la tabla)
+    fase_actual: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    subestado_codigo: Mapped[str] = mapped_column(String(50), default="sin_gestion", nullable=False)
+    paso1_completo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    paso2_completo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Auditoría automática del sistema
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    fecha_actualizacion: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    # Relación inversa con ComparendoORM
+    comparendo: Mapped["ComparendoORM"] = relationship("ComparendoORM", back_populates="gestion_operativa")
+

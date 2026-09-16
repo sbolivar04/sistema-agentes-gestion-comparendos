@@ -193,7 +193,35 @@ class RepositorioBaseDatos:
                 es_fotodeteccion=c.es_fotodeteccion
             )
 
-            esquema_recalc = calcular_descuentos(esquema_temp)
+            # Para comparendos pagados/no activos, evaluamos la vigencia del descuento según la fecha
+            # en que efectivamente se pagó o descargó del SIMIT, nunca según el día de hoy, preservando el beneficio legal.
+            fecha_eval = None
+            if c.estado_simit in ['No activo', 'Pagado']:
+                # 1. Fecha de pago en gestión operativa
+                g = getattr(c, "gestion_operativa", None)
+                if isinstance(g, list) and g:
+                    g = g[0]
+                if g and getattr(g, "fecha_pago", None):
+                    fp = g.fecha_pago
+                    if isinstance(fp, str):
+                        try:
+                            fecha_eval = datetime.strptime(fp.split("T")[0], "%Y-%m-%d").date()
+                        except Exception:
+                            fecha_eval = None
+                    elif isinstance(fp, datetime):
+                        fecha_eval = fp.date()
+                    elif isinstance(fp, date):
+                        fecha_eval = fp
+
+                # 2. Fecha de descargue del SIMIT
+                if not fecha_eval and c.fecha_descarga_simit:
+                    fecha_eval = c.fecha_descarga_simit.date() if isinstance(c.fecha_descarga_simit, datetime) else c.fecha_descarga_simit
+
+                # 3. Fallback a fecha de última actualización
+                if not fecha_eval and c.fecha_ultima_actualizacion:
+                    fecha_eval = c.fecha_ultima_actualizacion.date() if isinstance(c.fecha_ultima_actualizacion, datetime) else c.fecha_ultima_actualizacion
+
+            esquema_recalc = calcular_descuentos(esquema_temp, fecha_evaluacion=fecha_eval)
 
             cambio = False
             if c.aplica_descuento_50 != esquema_recalc.aplica_descuento_50:

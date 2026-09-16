@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react'
+import { apiBackend } from '../servicios/apiBackend'
+import { subirSoporteASupabaseStorage, eliminarSoporteDeSupabaseStorage } from '../servicios/almacenamientoSupabase'
 import { 
   X, 
   CheckCircle2, 
@@ -27,7 +29,8 @@ import {
   FileCheck2,
   Paperclip,
   Mail,
-  Lock
+  Lock,
+  RefreshCw
 } from 'lucide-react'
 import { SelectorDesplegable } from './SelectorDesplegable'
 import { SelectorFecha } from './SelectorFecha'
@@ -38,23 +41,21 @@ import { EtiquetaTooltip } from './EtiquetaTooltip'
 const OPCIONES_DISTRIBUCION_PAGO = [
   { valor: '100_conductor', etiqueta: '100% Conductor', icono: User },
   { valor: '50_50', etiqueta: '50% Empresa • 50% Conductor', icono: Users },
-  { valor: '100_empresa', etiqueta: '100% Empresa', icono: Building2 },
+  { valor: '100_empresa', etiqueta: '100% Empresa (FSCR)', icono: Building2 },
   { valor: '100_cliente', etiqueta: '100% Cliente', icono: Briefcase }
 ]
 
 // Opciones de canal de recaudo para el pago
 const OPCIONES_CANAL_PAGO = [
-  { valor: 'pse_simit', etiqueta: 'Pasarela PSE - Portal SIMIT' },
-  { valor: 'banco_occidente', etiqueta: 'Banco de Occidente' },
-  { valor: 'banco_popular', etiqueta: 'Banco Popular' },
-  { valor: 'banco_bogota', etiqueta: 'Banco de Bogotá' },
-  { valor: 'corresponsal', etiqueta: 'Efecty / Baloto / Corresponsal' },
-  { valor: 'secretaria_directo', etiqueta: 'Taquilla Directa Secretaría Tránsito' }
+  { valor: 'banco', etiqueta: 'Sucursal Bancaria / Débito', icono: Building2 },
+  { valor: 'pse', etiqueta: 'Portal SIMIT (PSE)', icono: CreditCard },
+  { valor: 'corresponsal', etiqueta: 'Efecty / Corresponsal', icono: Users },
+  { valor: 'otro', etiqueta: 'Otro Canal Autorizado', icono: FileText }
 ]
 
 /**
- * Formatea un número de cédula de ciudadanía aceptando únicamente dígitos numéricos
- * y aplicando separadores de miles con punto (ej. 1.020.450.890).
+ * Formatea un número de cédula o documento de identidad aplicando separador de miles con punto
+ * (ej. 1023456789 -> 1.023.456.789).
  */
 function formatearDocumentoMiles(valor) {
   if (!valor) return ''
@@ -95,37 +96,124 @@ function formatearFechaVisual(strFecha) {
 }
 
 /**
+ * Extrae y formatea los datos iniciales de gestión operativa para montar el modal de inmediato
+ * sin saltos de interfaz ni pantallas en blanco.
+ */
+function resolverDatosGestionInicial(datos, comp) {
+  if (!datos) {
+    return {
+      fase: 1,
+      respNombre: '',
+      respDoc: '',
+      distPago: '',
+      obsAsig: '',
+      sopCorreo: null,
+      sopFirma: null,
+      valPag: comp?.valor_a_pagar ? formatearMonedaMiles(Math.round(Number(comp.valor_a_pagar))) : '',
+      fecPag: '',
+      sopFactura: null,
+      sopCurso: null,
+      confSimit: false,
+      fecSimit: ''
+    }
+  }
+
+  const paso1CompletoDatos = Boolean(
+    (datos.paso1Completo === true || datos.paso1_completo === true) || (
+      (datos.responsableNombre || datos.responsable_nombre)?.trim() &&
+      (datos.responsableDocumento || datos.responsable_documento) &&
+      (datos.distribucionPago || datos.distribucion_pago) &&
+      (datos.soporteCorreo || datos.soporte_correo) &&
+      (datos.soporteFirma || datos.soporte_firma)
+    )
+  )
+
+  const paso2CompletoDatos = Boolean(
+    paso1CompletoDatos && (
+      (datos.paso2Completo === true || datos.paso2_completo === true) || (
+        (datos.valorPagado || datos.valor_pagado) && 
+        Number(String(datos.valorPagado || datos.valor_pagado).replace(/\D/g, '')) > 0 &&
+        (datos.fechaPago || datos.fecha_pago) &&
+        (datos.soporteFactura || datos.soporte_factura)
+      )
+    )
+  )
+
+  let fase = 1
+  const faseGuardada = Number(datos.faseActual || datos.fase_actual)
+  if (comp?.estado_simit === 'No activo' || comp?.estado_simit === 'Pagado' || datos.confirmadoDescargueSimit || datos.confirmado_descargue_simit) {
+    fase = 3
+  } else if (faseGuardada === 3 && paso2CompletoDatos) {
+    fase = 3
+  } else if (faseGuardada === 2 && paso1CompletoDatos) {
+    fase = 2
+  } else {
+    // Si no ha completado el Paso 1, abre estrictamente en el Paso 1
+    fase = 1
+  }
+
+  const respNombre = datos.responsableNombre || datos.responsable_nombre
+  const respDoc = datos.responsableDocumento || datos.responsable_documento
+  const distPago = datos.distribucionPago || datos.distribucion_pago
+  const obsAsig = datos.observacionesAsignacion || datos.observaciones_asignacion
+  const valPag = datos.valorPagado || datos.valor_pagado
+  const fecPag = datos.fechaPago || datos.fecha_pago
+  const confSimit = datos.confirmadoDescargueSimit ?? datos.confirmado_descargue_simit
+  const fecSimit = datos.fechaConfirmacionSimit || datos.fecha_confirmacion_simit
+
+  return {
+    fase,
+    respNombre: respNombre ? respNombre.trim() : '',
+    respDoc: respDoc ? formatearDocumentoMiles(respDoc) : '',
+    distPago: distPago || '',
+    obsAsig: obsAsig || '',
+    sopCorreo: datos.soporteCorreo || datos.soporte_correo || null,
+    sopFirma: datos.soporteFirma || datos.soporte_firma || null,
+    valPag: valPag ? formatearMonedaMiles(valPag) : (comp?.valor_a_pagar ? formatearMonedaMiles(Math.round(Number(comp.valor_a_pagar))) : ''),
+    fecPag: fecPag || '',
+    sopFactura: datos.soporteFactura || datos.soporte_factura || null,
+    sopCurso: datos.soporteCursoVial || datos.soporte_curso_vial || null,
+    confSimit: confSimit !== undefined ? Boolean(confSimit) : false,
+    fecSimit: fecSimit || ''
+  }
+}
+
+/**
  * Componente ModalGestionOperativa
  * Formulario de flujo operacional paso a paso con diseño premium de 2 columnas paralelas.
  */
-export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestion }) {
+export function ModalGestionOperativa({ comparendo, gestionInicial, alCerrar, alActualizarGestion }) {
+  const datosIniciales = resolverDatosGestionInicial(gestionInicial, comparendo)
+
   // Fase activa del stepper (1: Asignación, 2: Pago, 3: Descargue SIMIT)
-  const [faseActual, setFaseActual] = useState(1)
+  const [faseActual, setFaseActual] = useState(datosIniciales.fase)
 
   // Datos de la Fase 1: Asignación y Autorizaciones
-  const [responsableNombre, setResponsableNombre] = useState('')
-  const [responsableDocumento, setResponsableDocumento] = useState('')
-  const [distribucionPago, setDistribucionPago] = useState('100_conductor')
-  const [observacionesAsignacion, setObservacionesAsignacion] = useState('')
-  const [soporteCorreo, setSoporteCorreo] = useState(null)
-  const [soporteFirma, setSoporteFirma] = useState(null)
+  const [responsableNombre, setResponsableNombre] = useState(datosIniciales.respNombre)
+  const [responsableDocumento, setResponsableDocumento] = useState(datosIniciales.respDoc)
+  const [distribucionPago, setDistribucionPago] = useState(datosIniciales.distPago)
+  const [observacionesAsignacion, setObservacionesAsignacion] = useState(datosIniciales.obsAsig)
+  const [soporteCorreo, setSoporteCorreo] = useState(datosIniciales.sopCorreo)
+  const [soporteFirma, setSoporteFirma] = useState(datosIniciales.sopFirma)
 
   // Datos de la Fase 2: Pago y Facturación
-  const [valorPagado, setValorPagado] = useState('')
-  const [fechaPago, setFechaPago] = useState('')
-  const [numeroComprobante, setNumeroComprobante] = useState('')
-  const [canalPago, setCanalPago] = useState('pse_simit')
-  const [soporteFactura, setSoporteFactura] = useState(null)
-  const [soporteCursoVial, setSoporteCursoVial] = useState(null)
-  const [observacionesPago, setObservacionesPago] = useState('')
+  const [valorPagado, setValorPagado] = useState(datosIniciales.valPag)
+  const [fechaPago, setFechaPago] = useState(datosIniciales.fecPag)
+  const [soporteFactura, setSoporteFactura] = useState(datosIniciales.sopFactura)
+  const [soporteCursoVial, setSoporteCursoVial] = useState(datosIniciales.sopCurso)
 
   // Datos de la Fase 3: Descargue SIMIT
-  const [confirmadoDescargueSimit, setConfirmadoDescargueSimit] = useState(false)
-  const [fechaConfirmacionSimit, setFechaConfirmacionSimit] = useState('')
+  const [confirmadoDescargueSimit, setConfirmadoDescargueSimit] = useState(datosIniciales.confSimit)
+  const [fechaConfirmacionSimit, setFechaConfirmacionSimit] = useState(datosIniciales.fecSimit)
 
-  // Visor Lightbox y alertas
+  // Estados de carga a Supabase Storage por slot
+  const [subiendoSoporte, setSubiendoSoporte] = useState({})
+
+  // Visor Lightbox, estados de sincronización con Supabase y alertas
   const [soporteEnVisor, setSoporteEnVisor] = useState(null)
   const [guardadoExitoso, setGuardadoExitoso] = useState(false)
+  const [guardandoEnBd, setGuardandoEnBd] = useState(false)
+  const [cargandoBd, setCargandoBd] = useState(false)
 
   // Validación estricta del Paso 1: todos los campos obligatorios (*) y los 2 soportes requeridos cargados
   const fase1Completa = Boolean(
@@ -154,52 +242,126 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
     confirmadoDescargueSimit
   )
 
-  // Inicializar valor a pagar por defecto y cargar datos guardados en localStorage
+  // Sincronizar datos de gestión operativa
   useEffect(() => {
     if (!comparendo?.id) return
 
-    // Valor predeterminado si no se ha guardado uno
-    if (comparendo.valor_a_pagar) {
-      setValorPagado(formatearMonedaMiles(Math.round(Number(comparendo.valor_a_pagar))))
+    const resetearFormulario = () => {
+      setFaseActual(1)
+      setResponsableNombre('')
+      setResponsableDocumento('')
+      setDistribucionPago('')
+      setObservacionesAsignacion('')
+      setSoporteCorreo(null)
+      setSoporteFirma(null)
+      setValorPagado(comparendo.valor_a_pagar ? formatearMonedaMiles(Math.round(Number(comparendo.valor_a_pagar))) : '')
+      setFechaPago('')
+      setSoporteFactura(null)
+      setSoporteCursoVial(null)
+      setConfirmadoDescargueSimit(false)
+      setFechaConfirmacionSimit('')
     }
 
-    const claveStorage = `gestion_operativa_${comparendo.id}`
-    try {
-      const datosGuardados = localStorage.getItem(claveStorage)
-      if (datosGuardados) {
-        const parsed = JSON.parse(datosGuardados)
-        const paso1GuardadoCompleto = Boolean(
-          parsed.responsableNombre?.trim() &&
-          parsed.responsableDocumento &&
-          parsed.distribucionPago &&
-          parsed.soporteCorreo &&
-          parsed.soporteFirma
-        )
-        if (parsed.faseActual && paso1GuardadoCompleto) {
-          setFaseActual(parsed.faseActual)
-        } else {
-          setFaseActual(1)
-        }
-        if (parsed.responsableNombre) setResponsableNombre(parsed.responsableNombre.trim())
-        if (parsed.responsableDocumento) setResponsableDocumento(formatearDocumentoMiles(parsed.responsableDocumento))
-        if (parsed.distribucionPago) setDistribucionPago(parsed.distribucionPago)
-        if (parsed.observacionesAsignacion) setObservacionesAsignacion(parsed.observacionesAsignacion)
-        if (parsed.soporteCorreo) setSoporteCorreo(parsed.soporteCorreo)
-        if (parsed.soporteFirma) setSoporteFirma(parsed.soporteFirma)
-        if (parsed.valorPagado) setValorPagado(formatearMonedaMiles(parsed.valorPagado))
-        if (parsed.fechaPago) setFechaPago(parsed.fechaPago)
-        if (parsed.numeroComprobante) setNumeroComprobante(parsed.numeroComprobante)
-        if (parsed.canalPago) setCanalPago(parsed.canalPago)
-        if (parsed.soporteFactura) setSoporteFactura(parsed.soporteFactura)
-        if (parsed.soporteCursoVial) setSoporteCursoVial(parsed.soporteCursoVial)
-        if (parsed.observacionesPago) setObservacionesPago(parsed.observacionesPago)
-        if (parsed.confirmadoDescargueSimit) setConfirmadoDescargueSimit(parsed.confirmadoDescargueSimit)
-        if (parsed.fechaConfirmacionSimit) setFechaConfirmacionSimit(parsed.fechaConfirmacionSimit)
+    const aplicarDatosGestion = (datos) => {
+      if (!datos) {
+        resetearFormulario()
+        return
       }
-    } catch (e) {
-      console.warn('Error al leer datos previos de gestión:', e)
+
+      const paso1CompletoDatos = Boolean(
+        (datos.paso1Completo === true || datos.paso1_completo === true) || (
+          (datos.responsableNombre || datos.responsable_nombre)?.trim() &&
+          (datos.responsableDocumento || datos.responsable_documento) &&
+          (datos.distribucionPago || datos.distribucion_pago) &&
+          (datos.soporteCorreo || datos.soporte_correo) &&
+          (datos.soporteFirma || datos.soporte_firma)
+        )
+      )
+
+      const paso2CompletoDatos = Boolean(
+        paso1CompletoDatos && (
+          (datos.paso2Completo === true || datos.paso2_completo === true) || (
+            (datos.valorPagado || datos.valor_pagado) && 
+            Number(String(datos.valorPagado || datos.valor_pagado).replace(/\D/g, '')) > 0 &&
+            (datos.fechaPago || datos.fecha_pago) &&
+            (datos.soporteFactura || datos.soporte_factura)
+          )
+        )
+      )
+
+      let fase = 1
+      const faseGuardada = Number(datos.faseActual || datos.fase_actual)
+      if (comparendo?.estado_simit === 'No activo' || comparendo?.estado_simit === 'Pagado' || datos.confirmadoDescargueSimit || datos.confirmado_descargue_simit) {
+        fase = 3
+      } else if (faseGuardada === 3 && paso2CompletoDatos) {
+        fase = 3
+      } else if (faseGuardada === 2 && paso1CompletoDatos) {
+        fase = 2
+      } else {
+        fase = 1
+      }
+      setFaseActual(fase)
+
+      const respNombre = datos.responsableNombre || datos.responsable_nombre
+      setResponsableNombre(respNombre ? respNombre.trim() : '')
+
+      const respDoc = datos.responsableDocumento || datos.responsable_documento
+      setResponsableDocumento(respDoc ? formatearDocumentoMiles(respDoc) : '')
+
+      const distPago = datos.distribucionPago || datos.distribucion_pago
+      setDistribucionPago(distPago || '')
+
+      const obsAsig = datos.observacionesAsignacion || datos.observaciones_asignacion
+      setObservacionesAsignacion(obsAsig || '')
+
+      setSoporteCorreo(datos.soporteCorreo || datos.soporte_correo || null)
+      setSoporteFirma(datos.soporteFirma || datos.soporte_firma || null)
+
+      const valPag = datos.valorPagado || datos.valor_pagado
+      setValorPagado(valPag ? formatearMonedaMiles(valPag) : (comparendo.valor_a_pagar ? formatearMonedaMiles(Math.round(Number(comparendo.valor_a_pagar))) : ''))
+
+      const fecPag = datos.fechaPago || datos.fecha_pago
+      setFechaPago(fecPag || '')
+
+      setSoporteFactura(datos.soporteFactura || datos.soporte_factura || null)
+      setSoporteCursoVial(datos.soporteCursoVial || datos.soporte_curso_vial || null)
+
+      const confSimit = datos.confirmadoDescargueSimit ?? datos.confirmado_descargue_simit
+      setConfirmadoDescargueSimit(confSimit !== undefined ? Boolean(confSimit) : false)
+
+      const fecSimit = datos.fechaConfirmacionSimit || datos.fecha_confirmacion_simit
+      setFechaConfirmacionSimit(fecSimit || '')
     }
-  }, [comparendo])
+
+    // Si ya vino precargado desde la tabla en memoria, aplicar de inmediato sin llamadas de red
+    if (gestionInicial) {
+      aplicarDatosGestion(gestionInicial)
+      setCargandoBd(false)
+      return
+    }
+
+    // Si no vino precargado, consultar registro oficial directamente desde Supabase Cloud (PostgreSQL)
+    let activo = true
+    setCargandoBd(true)
+    apiBackend.obtenerGestionComparendo(comparendo.id)
+      .then((res) => {
+        if (!activo) return
+        setCargandoBd(false)
+        if (res?.exitoso && res.gestion) {
+          aplicarDatosGestion(res.gestion)
+        } else {
+          resetearFormulario()
+          localStorage.removeItem(`gestion_operativa_${comparendo.id}`)
+        }
+      })
+      .catch((err) => {
+        if (!activo) return
+        setCargandoBd(false)
+        console.warn('Error al cargar gestión desde Supabase:', err)
+      })
+
+    return () => { activo = false }
+  }, [comparendo?.id])
 
   // Cerrar al presionar Escape si el visor no está abierto
   useEffect(() => {
@@ -214,28 +376,89 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
 
   if (!comparendo) return null
 
-  // Procesar carga de archivo a DataURL
-  const manejarSubidaArchivo = (e, tipoSoporte) => {
+  // Procesar carga directa a Storage con reemplazo limpio del archivo anterior
+  const manejarSubidaArchivo = async (e, tipoSoporte) => {
     const archivo = e.target.files?.[0]
     if (!archivo) return
 
-    const lector = new FileReader()
-    lector.onload = () => {
-      const nuevoSoporte = {
-        id: `soporte_${Date.now()}`,
-        nombre: archivo.name,
-        tipo: archivo.type.includes('pdf') || archivo.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'imagen',
-        tamano: `${(archivo.size / 1024).toFixed(1)} KB`,
-        fechaCarga: new Date().toLocaleDateString('es-CO'),
-        url: lector.result
-      }
+    e.target.value = ''
+    setSubiendoSoporte(prev => ({ ...prev, [tipoSoporte]: true }))
+
+    // Identificar archivo previo para no dejar huérfanos en Storage si se está modificando
+    let soporteAnterior = null
+    if (tipoSoporte === 'correo') soporteAnterior = soporteCorreo
+    else if (tipoSoporte === 'firma') soporteAnterior = soporteFirma
+    else if (tipoSoporte === 'factura') soporteAnterior = soporteFactura
+    else if (tipoSoporte === 'curso') soporteAnterior = soporteCursoVial
+
+    try {
+      const nuevoSoporte = await subirSoporteASupabaseStorage(archivo, comparendo.id, tipoSoporte)
 
       if (tipoSoporte === 'correo') setSoporteCorreo(nuevoSoporte)
       if (tipoSoporte === 'firma') setSoporteFirma(nuevoSoporte)
       if (tipoSoporte === 'factura') setSoporteFactura(nuevoSoporte)
       if (tipoSoporte === 'curso') setSoporteCursoVial(nuevoSoporte)
+
+      // Si se subió con éxito el nuevo y existía uno anterior, eliminar el viejo de Storage
+      const rutaAnterior = soporteAnterior?.rutaStorage || soporteAnterior?.url
+      if (rutaAnterior && rutaAnterior !== nuevoSoporte.rutaStorage) {
+        eliminarSoporteDeSupabaseStorage(rutaAnterior)
+      }
+    } catch (err) {
+      console.error('Error al subir soporte:', err)
+      alert('Error al subir archivo: ' + (err.message || 'Verifique la conexión.'))
+    } finally {
+      setSubiendoSoporte(prev => ({ ...prev, [tipoSoporte]: false }))
     }
-    lector.readAsDataURL(archivo)
+  }
+
+  // Eliminar soporte de Storage y de estado local
+  const manejarEliminarSoporte = async (tipoSoporte) => {
+    let soporteActual = null
+    const claveStorage = `gestion_operativa_${comparendo.id}`
+
+    if (tipoSoporte === 'correo') {
+      soporteActual = soporteCorreo
+      setSoporteCorreo(null)
+    } else if (tipoSoporte === 'firma') {
+      soporteActual = soporteFirma
+      setSoporteFirma(null)
+    } else if (tipoSoporte === 'factura') {
+      soporteActual = soporteFactura
+      setSoporteFactura(null)
+    } else if (tipoSoporte === 'curso') {
+      soporteActual = soporteCursoVial
+      setSoporteCursoVial(null)
+    }
+
+    // Eliminar físicamente el archivo de Supabase Storage
+    const rutaAEliminar = soporteActual?.rutaStorage || soporteActual?.url
+    if (rutaAEliminar) {
+      try {
+        await eliminarSoporteDeSupabaseStorage(rutaAEliminar)
+      } catch (err) {
+        console.warn('Error al eliminar archivo de Supabase Storage:', err)
+      }
+    }
+
+    // Actualizar de inmediato la copia local en localStorage para consistencia inmediata
+    try {
+      const guardadoLocal = localStorage.getItem(claveStorage)
+      if (guardadoLocal) {
+        const parsed = JSON.parse(guardadoLocal)
+        if (tipoSoporte === 'correo') { parsed.soporteCorreo = null; parsed.soporte_correo = null; }
+        if (tipoSoporte === 'firma') { parsed.soporteFirma = null; parsed.soporte_firma = null; }
+        if (tipoSoporte === 'factura') { parsed.soporteFactura = null; parsed.soporte_factura = null; }
+        if (tipoSoporte === 'curso') { parsed.soporteCursoVial = null; parsed.soporte_curso_vial = null; }
+        localStorage.setItem(claveStorage, JSON.stringify(parsed))
+      }
+    } catch {
+      // Ignorar errores de localStorage
+    }
+
+    // Persistir de inmediato en Supabase PostgreSQL para consistencia total
+    const campoSoporte = tipoSoporte === 'curso' ? 'soporteCursoVial' : (tipoSoporte === 'correo' ? 'soporteCorreo' : (tipoSoporte === 'firma' ? 'soporteFirma' : 'soporteFactura'))
+    guardarAvance(null, null, null, { [campoSoporte]: null })
   }
 
   // Manejar cambio en el número de documento: solo acepta dígitos y aplica separador de miles
@@ -250,12 +473,18 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
     setValorPagado(valorFormateado)
   }
 
-  // Guardar estado actual en localStorage
-  const guardarAvance = (nuevaFase = null, simitConfirmado = null, fechaSimit = null) => {
+  // Guardar estado actual en Supabase PostgreSQL y sincronizar en localStorage
+  const guardarAvance = (nuevaFase = null, simitConfirmado = null, fechaSimit = null, soportesSobrescritos = null) => {
     const faseAGuardar = nuevaFase !== null ? nuevaFase : faseActual
     const esConfirmadoSimit = simitConfirmado !== null ? simitConfirmado : confirmadoDescargueSimit
     const strFechaSimit = fechaSimit !== null ? fechaSimit : fechaConfirmacionSimit
     const claveStorage = `gestion_operativa_${comparendo.id}`
+
+    // Resolver soportes considerando sobreescrituras inmediatas si aplican
+    const soporteCorreoFinal = soportesSobrescritos && 'soporteCorreo' in soportesSobrescritos ? soportesSobrescritos.soporteCorreo : soporteCorreo
+    const soporteFirmaFinal = soportesSobrescritos && 'soporteFirma' in soportesSobrescritos ? soportesSobrescritos.soporteFirma : soporteFirma
+    const soporteFacturaFinal = soportesSobrescritos && 'soporteFactura' in soportesSobrescritos ? soportesSobrescritos.soporteFactura : soporteFactura
+    const soporteCursoVialFinal = soportesSobrescritos && 'soporteCursoVial' in soportesSobrescritos ? soportesSobrescritos.soporteCursoVial : soporteCursoVial
 
     // Eliminar espacios en blanco al inicio y al final del nombre del responsable
     const nombreLimpio = responsableNombre ? responsableNombre.trim() : ''
@@ -269,8 +498,8 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
     setValorPagado(valorLimpio)
 
     // Determinar el subestado operativo actual
-    let subestadoCodigo = 'identificacion'
-    let subestadoTexto = 'Fase 1: En Asignación de Responsable'
+    let subestadoCodigo = 'sin_gestion'
+    let subestadoTexto = 'Sin Gestión'
 
     if (esDescargadoSimit) {
       subestadoCodigo = 'descargado_paz_y_salvo'
@@ -283,10 +512,10 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
       // En el Paso 2 permanece estrictamente en trámite de pago
       subestadoCodigo = 'pendiente_pago'
       subestadoTexto = 'Fase 2: En Trámite de Pago'
-    } else if (nombreLimpio && (soporteCorreo || soporteFirma)) {
+    } else if (nombreLimpio && (soporteCorreoFinal || soporteFirmaFinal)) {
       subestadoCodigo = 'revision_aprobacion'
       subestadoTexto = 'Fase 1: En Revisión de Firmas'
-    } else if (nombreLimpio || documentoLimpio || distribucionPago) {
+    } else if (nombreLimpio || documentoLimpio || (distribucionPago && String(distribucionPago).trim().length > 0)) {
       subestadoCodigo = 'identificacion'
       subestadoTexto = 'Fase 1: En Asignación de Responsable'
     }
@@ -302,15 +531,12 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
       responsableDocumento: documentoLimpio,
       distribucionPago,
       observacionesAsignacion,
-      soporteCorreo,
-      soporteFirma,
-      valorPagado,
+      soporteCorreo: soporteCorreoFinal,
+      soporteFirma: soporteFirmaFinal,
+      valorPagado: valorLimpio,
       fechaPago,
-      numeroComprobante,
-      canalPago,
-      soporteFactura,
-      soporteCursoVial,
-      observacionesPago,
+      soporteFactura: soporteFacturaFinal,
+      soporteCursoVial: soporteCursoVialFinal,
       confirmadoDescargueSimit: esConfirmadoSimit,
       fechaConfirmacionSimit: strFechaSimit,
       ultimaActualizacion: new Date().toISOString()
@@ -323,29 +549,43 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
       if (alActualizarGestion) {
         alActualizarGestion(comparendo.id, payload)
       }
+
+      // Persistencia oficial en Supabase PostgreSQL
+      setGuardandoEnBd(true)
+      apiBackend.guardarGestionComparendo(comparendo.id, payload)
+        .then((res) => {
+          setGuardandoEnBd(false)
+          if (res?.exitoso && res.gestion) {
+            localStorage.setItem(claveStorage, JSON.stringify(res.gestion))
+            if (alActualizarGestion) {
+              alActualizarGestion(comparendo.id, res.gestion)
+            }
+          }
+        })
+        .catch((err) => {
+          setGuardandoEnBd(false)
+          console.error('Error al persistir gestión en Supabase:', err)
+        })
     } catch (e) {
       console.error('Error al guardar gestión operativa:', e)
     }
   }
 
+  const puedeAccederAPaso = (pasoDestino) => {
+    // Siempre puede ver o regresar al Paso 1
+    if (pasoDestino === 1) return true
+    // Para acceder al Paso 2, el Paso 1 debe estar completado
+    if (pasoDestino === 2) return fase1Completa
+    // Para acceder al Paso 3, debe estar descargado en SIMIT o haber completado Paso 1 y Paso 2
+    if (pasoDestino === 3) return esDescargadoSimit || (fase1Completa && fase2Completa)
+    return false
+  }
+
   const navegarAPaso = (pasoDestino) => {
-    if (pasoDestino === 1) {
-      setFaseActual(1)
-      guardarAvance(1)
-      return
-    }
-    if (pasoDestino === 2) {
-      if (!fase1Completa) return
-      setFaseActual(2)
-      guardarAvance(2)
-      return
-    }
-    if (pasoDestino === 3) {
-      if (!fase1Completa || !fase2Completa) return
-      setFaseActual(3)
-      guardarAvance(3)
-      return
-    }
+    if (!puedeAccederAPaso(pasoDestino)) return
+    if (pasoDestino === faseActual) return
+    setFaseActual(pasoDestino)
+    guardarAvance(pasoDestino)
   }
 
   const avanzarFase = () => {
@@ -400,7 +640,7 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
         icono: UserCheck
       }
     }
-    if (responsableNombre || responsableDocumento || distribucionPago) {
+    if (responsableNombre || responsableDocumento || (distribucionPago && String(distribucionPago).trim().length > 0)) {
       return {
         texto: 'En Asignación',
         clase: 'identificacion',
@@ -408,16 +648,16 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
       }
     }
     return {
-      texto: 'Pendiente Identificación',
-      clase: 'identificacion',
-      icono: AlertCircle
+      texto: 'Sin Gestión',
+      clase: 'sin_gestion',
+      icono: Clock
     }
   }
 
   const badgeActual = obtenerBadgeSubestado()
   const IconoBadge = badgeActual.icono
 
-  // Renderizar slot de soporte minimalista y compacto
+  // Renderizar slot de soporte minimalista y compacto con estado de Supabase Storage
   const renderizarSlotSoporteMinimalista = ({
     titulo,
     subtitulo,
@@ -425,9 +665,12 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
     esObligatorio = true,
     soporte,
     tipoSoporte,
-    alSubir,
+    alSubir = manejarSubidaArchivo,
     alEliminar
   }) => {
+    const estaSubiendo = Boolean(subiendoSoporte[tipoSoporte])
+    const accionEliminar = alEliminar || (() => manejarEliminarSoporte(tipoSoporte))
+
     return (
       <div className={`slot-soporte-minimalista ${soporte ? 'adjuntado' : ''}`}>
         <div className="slot-soporte-izq">
@@ -478,6 +721,8 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
                 <a 
                   href={soporte.url} 
                   download={soporte.nombre}
+                  target="_blank"
+                  rel="noreferrer"
                   className="boton-mini-soporte"
                 >
                   <Download size={13} />
@@ -488,11 +733,16 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
                 <button 
                   type="button" 
                   className="boton-mini-soporte eliminar"
-                  onClick={alEliminar}
+                  onClick={accionEliminar}
                 >
                   <Trash2 size={13} />
                 </button>
               </EtiquetaTooltip>
+            </div>
+          ) : estaSubiendo ? (
+            <div className="boton-adjuntar-minimalista" style={{ opacity: 0.85, cursor: 'wait', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--color-primario)' }}>
+              <RefreshCw size={13} className="animar-giro" />
+              <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Subiendo...</span>
             </div>
           ) : (
             <EtiquetaTooltip texto="Adjuntar soporte en formato PDF o Imagen" posicion="arriba">
@@ -610,8 +860,8 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
             {/* Paso 2 */}
             <EtiquetaTooltip 
               texto={
-                !fase1Completa 
-                  ? "Bloqueado: Complete los campos obligatorios (*) y adjunte los 2 soportes requeridos en el Paso 1" 
+                !fase1Completa
+                  ? "Bloqueado: Complete los campos obligatorios (*) y adjunte los 2 soportes en el Paso 1 para desbloquear"
                   : "Paso 2: Registro de valor pagado, fecha de pago y soporte de factura"
               } 
               posicion="abajo"
@@ -637,24 +887,22 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
             {/* Paso 3 */}
             <EtiquetaTooltip 
               texto={
-                !fase1Completa 
-                  ? "Bloqueado: Debe completar primero el Paso 1" 
-                  : (!fase2Completa 
-                      ? "Bloqueado: Ingrese el valor pagado, la fecha de pago y adjunte la factura en el Paso 2" 
-                      : (esDescargadoSimit
-                          ? "Paso 3: Paz y Salvo oficial descargado en SIMIT" 
-                          : "Paso 3: Comparendo pagado • Esperando descargue en SIMIT"))
+                (!fase1Completa || !fase2Completa) && !esDescargadoSimit
+                  ? "Bloqueado: Complete el registro de pago y adjunte la factura en el Paso 2 para desbloquear"
+                  : (esDescargadoSimit
+                      ? "Paso 3: Paz y Salvo oficial descargado en SIMIT" 
+                      : "Paso 3: Comparendo pagado • Esperando descargue en SIMIT")
               } 
               posicion="abajo"
             >
               <button 
                 type="button"
-                className={`stepper-paso-item ${faseActual === 3 ? 'activo' : ''} ${esDescargadoSimit ? 'completado' : ''} ${(!fase1Completa || !fase2Completa) ? 'bloqueado' : ''}`}
-                disabled={!fase1Completa || !fase2Completa}
+                className={`stepper-paso-item ${faseActual === 3 ? 'activo' : ''} ${esDescargadoSimit ? 'completado' : ''} ${((!fase1Completa || !fase2Completa) && !esDescargadoSimit) ? 'bloqueado' : ''}`}
+                disabled={(!fase1Completa || !fase2Completa) && !esDescargadoSimit}
                 onClick={() => navegarAPaso(3)}
               >
                 <div className="stepper-icono-circulo">
-                  {(!fase1Completa || !fase2Completa) ? <Lock size={12} /> : (esDescargadoSimit ? <Check size={16} /> : '3')}
+                  {((!fase1Completa || !fase2Completa) && !esDescargadoSimit) ? <Lock size={12} /> : (esDescargadoSimit ? <Check size={16} /> : '3')}
                 </div>
                 <div className="stepper-textos">
                   <span className="stepper-paso-numero">Paso 3</span>
@@ -732,6 +980,7 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
                           opciones={OPCIONES_DISTRIBUCION_PAGO}
                           valor={distribucionPago}
                           alCambiar={(val) => setDistribucionPago(val)}
+                          placeholder="Seleccione responsable del pago..."
                           anchoMinimo="100%"
                           tamano="compacto"
                         />
@@ -776,7 +1025,7 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
                         soporte: soporteCorreo,
                         tipoSoporte: 'correo',
                         alSubir: manejarSubidaArchivo,
-                        alEliminar: () => setSoporteCorreo(null)
+                        alEliminar: () => manejarEliminarSoporte('correo')
                       })}
 
                       {/* Slot 2: Descuento en Blanco */}
@@ -788,7 +1037,7 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
                         soporte: soporteFirma,
                         tipoSoporte: 'firma',
                         alSubir: manejarSubidaArchivo,
-                        alEliminar: () => setSoporteFirma(null)
+                        alEliminar: () => manejarEliminarSoporte('firma')
                       })}
 
                       <div className="nota-pie-soportes">
@@ -864,7 +1113,7 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
                       </div>
                       <div>
                         <h4 className="titulo-cabecera-tarjeta">Comprobantes Oficiales</h4>
-                        <p className="subtitulo-cabecera-tarjeta">Recibo bancario emitido y certificado del curso</p>
+                        <p className="subtitulo-cabecera-tarjeta">Recibo bancario emitido y factura del curso</p>
                       </div>
                     </div>
 
@@ -878,19 +1127,19 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
                         soporte: soporteFactura,
                         tipoSoporte: 'factura',
                         alSubir: manejarSubidaArchivo,
-                        alEliminar: () => setSoporteFactura(null)
+                        alEliminar: () => manejarEliminarSoporte('factura')
                       })}
 
                       {/* Slot 2: Curso Pedagógico CIA */}
                       {renderizarSlotSoporteMinimalista({
-                        titulo: 'Certificado de Curso CIA',
+                        titulo: 'Factura de Curso CIA',
                         subtitulo: 'Requerido si se aplicó descuento del 50% o 25%',
                         icono: FileText,
                         esObligatorio: false,
                         soporte: soporteCursoVial,
                         tipoSoporte: 'curso',
                         alSubir: manejarSubidaArchivo,
-                        alEliminar: () => setSoporteCursoVial(null)
+                        alEliminar: () => manejarEliminarSoporte('curso')
                       })}
 
                       <div className="nota-pie-soportes">
@@ -1060,7 +1309,7 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
                         soporte: soporteCorreo,
                         tipoSoporte: 'correo',
                         alSubir: manejarSubidaArchivo,
-                        alEliminar: () => setSoporteCorreo(null)
+                        alEliminar: () => manejarEliminarSoporte('correo')
                       })}
 
                       {renderizarSlotSoporteMinimalista({
@@ -1071,7 +1320,7 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
                         soporte: soporteFirma,
                         tipoSoporte: 'firma',
                         alSubir: manejarSubidaArchivo,
-                        alEliminar: () => setSoporteFirma(null)
+                        alEliminar: () => manejarEliminarSoporte('firma')
                       })}
 
                       {renderizarSlotSoporteMinimalista({
@@ -1082,18 +1331,18 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
                         soporte: soporteFactura,
                         tipoSoporte: 'factura',
                         alSubir: manejarSubidaArchivo,
-                        alEliminar: () => setSoporteFactura(null)
+                        alEliminar: () => manejarEliminarSoporte('factura')
                       })}
 
                       {renderizarSlotSoporteMinimalista({
-                        titulo: 'Certificado de Curso CIA',
-                        subtitulo: 'Certificado pedagógico de escuela vial',
+                        titulo: 'Factura de Curso CIA',
+                        subtitulo: 'Factura pedagógica de escuela vial CIA',
                         icono: FileText,
                         esObligatorio: false,
                         soporte: soporteCursoVial,
                         tipoSoporte: 'curso',
                         alSubir: manejarSubidaArchivo,
-                        alEliminar: () => setSoporteCursoVial(null)
+                        alEliminar: () => manejarEliminarSoporte('curso')
                       })}
                     </div>
                   </div>
@@ -1107,10 +1356,16 @@ export function ModalGestionOperativa({ comparendo, alCerrar, alActualizarGestio
              ============================================================ */}
           <div className="modal-gestion-pie">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              {guardadoExitoso && (
+              {guardandoEnBd && (
+                <span className="mensaje-guardado-pill" style={{ borderColor: 'rgba(59, 130, 246, 0.4)', color: '#3b82f6' }}>
+                  <RefreshCw size={14} className="animar-giro" />
+                  <span>Sincronizando...</span>
+                </span>
+              )}
+              {guardadoExitoso && !guardandoEnBd && (
                 <span className="mensaje-guardado-pill">
                   <CheckCircle2 size={14} color="#10b981" />
-                  <span>Gestión guardada exitosamente</span>
+                  <span>Guardado correctamente</span>
                 </span>
               )}
             </div>

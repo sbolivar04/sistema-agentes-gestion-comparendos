@@ -631,7 +631,6 @@ export function PaginaInicio({ alNavegarAConfiguracion }) {
 
         {/* 2. Tabla de Comparendos */}
         <TablaComparendos 
-          key={versionComparendos} 
           busquedaExterna={busquedaAlerta} 
           versionBusquedaExterna={versionBusquedaAlerta}
           filtroEstadoExterno={filtroEstadoAlerta}

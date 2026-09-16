@@ -775,7 +775,7 @@ export function PaginaConfiguracion() {
                 {cargando ? (
                   <tr>
                     <td colSpan="5" style={{ textAlign: 'center', padding: '2rem' }}>
-                      Cargando entidades desde Supabase...
+                      Cargando entidades...
                     </td>
                   </tr>
                 ) : entidadesFiltradas.length === 0 ? (

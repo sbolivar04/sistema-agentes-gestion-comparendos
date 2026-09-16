@@ -193,7 +193,7 @@ export function SelectorDesplegable({
             />
           )}
 
-          <span className="selector-texto-etiqueta">
+          <span className={`selector-texto-etiqueta ${!opcionSeleccionada ? 'es-placeholder' : ''}`}>
             {opcionSeleccionada ? opcionSeleccionada.etiqueta : placeholder}
           </span>
         </div>
