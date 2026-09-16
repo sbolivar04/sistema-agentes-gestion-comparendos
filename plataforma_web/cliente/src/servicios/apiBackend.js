@@ -41,13 +41,42 @@ export const apiBackend = {
     return await res.json()
   },
 
-  async lanzarExtraccion(criterio = '', tipo_consulta = 'NIT') {
+  async iniciarSesion(email, contrasena) {
+    const res = await fetch(`${API_BASE}/autenticacion/iniciar-sesion`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, contrasena })
+    })
+    return await res.json()
+  },
+
+  async lanzarExtraccion(criterio = '', tipo_consulta = 'NIT', origen = null, usuario = null) {
     const crit = (typeof criterio === 'string') ? criterio.trim() : ''
     const tipo = (typeof tipo_consulta === 'string') ? tipo_consulta.trim() : 'NIT'
+
+    // Obtener usuario autenticado actual desde localStorage si no se suministra explícitamente
+    let usuarioFinal = usuario
+    if (!usuarioFinal) {
+      try {
+        const sesion = localStorage.getItem('usuario_fscr_sesion')
+        if (sesion) {
+          const u = JSON.parse(sesion)
+          usuarioFinal = u?.nombre || u?.email || 'Usuario FSCR'
+        }
+      } catch (e) {}
+    }
+
+    const origenFinal = origen || (crit ? 'MANUAL_INDIVIDUAL' : 'MANUAL_MASIVO')
+
     const res = await fetch(`${API_BASE}/extraccion/lanzar`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ criterio: crit, tipo_consulta: tipo })
+      body: JSON.stringify({
+        criterio: crit,
+        tipo_consulta: tipo,
+        origen: origenFinal,
+        usuario: usuarioFinal || 'Sistema'
+      })
     })
     return await res.json()
   },

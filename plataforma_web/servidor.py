@@ -13,12 +13,13 @@ from plataforma_web.rutas_api.extraccion import enrutador_extraccion
 from plataforma_web.rutas_api.entidades import enrutador_entidades
 from plataforma_web.rutas_api.programacion import enrutador_programacion
 from plataforma_web.rutas_api.gestiones_operativas import enrutador_gestiones_operativas
+from plataforma_web.rutas_api.autenticacion import enrutador_autenticacion
 
-# Version 1.0.3 - Programacion y horario dinamico desde cron.job
+# Version 1.0.4 - Autenticación con roles y trazabilidad de usuario
 app = FastAPI(
     title="Sistema de Gestión y Seguimiento de Comparendos SIMIT - FSCR Ingeniería",
     description="Plataforma de Inteligencia Artificial para Flotas Corporativas",
-    version="1.0.4"
+    version="1.0.5"
 )
 
 # Configurar CORS
@@ -31,6 +32,7 @@ app.add_middleware(
 )
 
 # Registrar enrutadores de API
+app.include_router(enrutador_autenticacion)
 app.include_router(enrutador_kpis)
 app.include_router(enrutador_alertas)
 app.include_router(enrutador_comparendos)

@@ -51,7 +51,8 @@ def obtener_entidades_activas() -> list[dict]:
 def ejecutar_extraccion_lote(
     sin_interfaz: bool = True,
     id_lote: Optional[str] = None,
-    origen: str = "PROGRAMADO_MASIVO"
+    origen: str = "PROGRAMADO_MASIVO",
+    usuario: str = "Sistema"
 ):
     """
     Ejecuta la extracción secuencial para todas las entidades activas de la flota corporativa
@@ -60,8 +61,11 @@ def ejecutar_extraccion_lote(
     if not id_lote:
         id_lote = f"lote_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
+    usuario_final = (usuario or "Sistema").strip()
+
     logger.info("=" * 80)
     logger.info(f" INICIANDO EXTRACCIÓN MASIVA CONTINUA PARA FLOTA CORPORATIVA (ID Lote: {id_lote})")
+    logger.info(f" Origen: {origen} | Usuario ejecutor: {usuario_final}")
     logger.info(f" Modo de navegación: {'Segundo plano (Headless)' if sin_interfaz else 'Visual en pantalla'}")
     logger.info("=" * 80)
 
@@ -102,7 +106,8 @@ def ejecutar_extraccion_lote(
                     criterio=criterio,
                     tipo_consulta=tipo_doc,
                     id_lote=id_lote,
-                    origen=origen
+                    origen=origen,
+                    usuario=usuario_final
                 )
             else:
                 totales["errores"] += 1
@@ -113,7 +118,8 @@ def ejecutar_extraccion_lote(
                     criterio=criterio,
                     tipo_consulta=tipo_doc,
                     id_lote=id_lote,
-                    origen=origen
+                    origen=origen,
+                    usuario=usuario_final
                 )
         except Exception as e_persistencia:
             logger.error(f"Error al persistir resultado para {criterio} ({empresa}): {e_persistencia}")
@@ -142,7 +148,8 @@ def ejecutar_extraccion_lote(
                             exitoso=False,
                             error=str(e_general)[:500],
                             id_lote=id_lote,
-                            origen=origen
+                            origen=origen,
+                            usuario=usuario_final
                         )
                 except Exception:
                     pass
@@ -168,8 +175,20 @@ def ejecutar_extraccion_lote(
         sys.exit(1)
 
 def main():
-    sin_interfaz = "--visual" not in sys.argv and "--con-interfaz" not in sys.argv
-    ejecutar_extraccion_lote(sin_interfaz=sin_interfaz)
+    import argparse
+    parser = argparse.ArgumentParser(description="Extracción en lote continua para flota corporativa")
+    parser.add_argument("--visual", action="store_true", help="Navegación visual con interfaz gráfica")
+    parser.add_argument("--con-interfaz", action="store_true", help="Navegación visual con interfaz gráfica")
+    parser.add_argument("--origen", type=str, default="PROGRAMADO_MASIVO", help="Origen: MANUAL_MASIVO, PROGRAMADO_MASIVO, etc.")
+    parser.add_argument("--usuario", type=str, default="Sistema", help="Nombre o correo del usuario ejecutor")
+    args, _ = parser.parse_known_args()
+
+    sin_interfaz = not (args.visual or args.con_interfaz)
+    ejecutar_extraccion_lote(
+        sin_interfaz=sin_interfaz,
+        origen=args.origen,
+        usuario=args.usuario
+    )
 
 if __name__ == "__main__":
     main()

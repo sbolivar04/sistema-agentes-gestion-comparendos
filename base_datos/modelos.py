@@ -75,6 +75,21 @@ class LogExtraccionORM(Base):
     mensaje_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     id_lote: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     origen: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default="MANUAL_INDIVIDUAL")
+    usuario: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, default="Sistema")
+
+class UsuarioORM(Base):
+    """
+    Modelo ORM para gestionar los usuarios con acceso al sistema y sus roles de auditoría.
+    """
+    __tablename__ = "usuarios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nombre: Mapped[str] = mapped_column(String(150), nullable=False)
+    email: Mapped[str] = mapped_column(String(150), unique=True, index=True, nullable=False)
+    contrasena_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    rol: Mapped[str] = mapped_column(String(50), default="OPERACIONES", nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 class EntidadConsultaORM(Base):
     """

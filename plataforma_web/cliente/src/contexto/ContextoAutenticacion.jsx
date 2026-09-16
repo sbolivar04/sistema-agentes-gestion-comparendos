@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
+import { apiBackend } from '../servicios/apiBackend'
 import { supabase } from '../servicios/clienteSupabase'
 
 const ContextoAutenticacion = createContext()
@@ -10,21 +11,18 @@ export function ProveedorAutenticacion({ children }) {
   })
   const [cargando, setCargando] = useState(false)
 
-  // Iniciar sesión con Supabase Auth o Acceso Directo Corporativo
+  // Iniciar sesión con validación real en PostgreSQL Supabase (tabla comparendos_fscr.usuarios)
   const iniciarSesion = async (email, password) => {
     setCargando(true)
     try {
-      // 1. Intentar con Supabase Auth si está configurado
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      })
+      const res = await apiBackend.iniciarSesion(email.trim(), password.trim())
 
-      if (data?.user) {
+      if (res && res.exitoso && res.usuario) {
         const infoUsuario = {
-          email: data.user.email,
-          nombre: data.user.user_metadata?.nombre || 'Administrador de Flota',
-          rol: 'Operaciones FSCR'
+          id: res.usuario.id,
+          email: res.usuario.email,
+          nombre: res.usuario.nombre,
+          rol: res.usuario.rol
         }
         setUsuario(infoUsuario)
         localStorage.setItem('usuario_fscr_sesion', JSON.stringify(infoUsuario))
@@ -32,22 +30,13 @@ export function ProveedorAutenticacion({ children }) {
         return { exitoso: true }
       }
 
-      // 2. Acceso Corporativo Directo / Demo
-      if (email && password) {
-        const infoUsuario = {
-          email: email,
-          nombre: email.split('@')[0] || 'Administrador Flota',
-          rol: 'Gerencia de Operaciones'
-        }
-        setUsuario(infoUsuario)
-        localStorage.setItem('usuario_fscr_sesion', JSON.stringify(infoUsuario))
-        localStorage.setItem('vista_actual_fscr', 'inicio')
-        return { exitoso: true }
+      return {
+        exitoso: false,
+        error: res?.error || 'Credenciales inválidas o usuario inactivo.'
       }
-
-      return { exitoso: false, error: 'Credenciales inválidas.' }
     } catch (e) {
-      return { exitoso: false, error: e.message }
+      console.error('Error al iniciar sesión:', e)
+      return { exitoso: false, error: 'Error de comunicación con el servidor de autenticación.' }
     } finally {
       setCargando(false)
     }

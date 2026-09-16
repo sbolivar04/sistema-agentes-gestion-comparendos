@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react'
 import { apiBackend } from '../servicios/apiBackend'
+import { useAutenticacion } from './ContextoAutenticacion'
 
 const ContextoFlota = createContext()
 
 export function ProveedorFlota({ children }) {
+  const { usuario } = useAutenticacion() || {}
   const [metricas, setMetricas] = useState({
     total_comparendos: 0,
     deuda_nominal_total: 0,
@@ -249,7 +251,9 @@ export function ProveedorFlota({ children }) {
     setMensajeSync(criterioLimpio ? `Reintentando consulta de ${etiquetaDestino} en SIMIT...` : 'Iniciando agente de extracción para toda la flota...')
 
     try {
-      const res = await apiBackend.lanzarExtraccion(criterioLimpio, tipoConsultaLimpio)
+      const origen = criterioLimpio ? 'MANUAL_INDIVIDUAL' : 'MANUAL_MASIVO'
+      const nombreUsuario = usuario?.nombre || usuario?.email || 'Administrador'
+      const res = await apiBackend.lanzarExtraccion(criterioLimpio, tipoConsultaLimpio, origen, nombreUsuario)
       if (res && res.exitoso) {
         setMensajeSync(criterioLimpio ? `El agente está consultando ${etiquetaDestino} en el SIMIT...` : 'El agente se está ejecutando y consultando las entidades...')
         iniciarMonitoreoProgreso(criterioLimpio, etiquetaDestino)

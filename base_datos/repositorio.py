@@ -1,10 +1,11 @@
 import logging
+import hashlib
 from datetime import datetime
 from typing import List, Tuple, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, case
 
-from base_datos.modelos import ComparendoORM, LogExtraccionORM, EntidadConsultaORM, PreferenciaConsultaORM
+from base_datos.modelos import ComparendoORM, LogExtraccionORM, EntidadConsultaORM, PreferenciaConsultaORM, UsuarioORM
 
 logger = logging.getLogger(__name__)
 
@@ -143,9 +144,10 @@ class RepositorioBaseDatos:
         exitoso: bool = True,
         error: str = None,
         id_lote: Optional[str] = None,
-        origen: Optional[str] = None
+        origen: Optional[str] = None,
+        usuario: Optional[str] = "Sistema"
     ) -> LogExtraccionORM:
-        """Registra la traza de auditoría de la ejecución de extracción con trazabilidad de lote y origen."""
+        """Registra la traza de auditoría de la ejecución de extracción con trazabilidad de lote, origen y usuario ejecutor."""
         log = LogExtraccionORM(
             criterio_busqueda=criterio,
             tipo_consulta=tipo_consulta,
@@ -155,11 +157,34 @@ class RepositorioBaseDatos:
             exitoso=exitoso,
             mensaje_error=error,
             id_lote=id_lote,
-            origen=origen or ("PROGRAMADO_MASIVO" if id_lote else "MANUAL_INDIVIDUAL")
+            origen=origen or ("PROGRAMADO_MASIVO" if id_lote else "MANUAL_INDIVIDUAL"),
+            usuario=usuario or "Sistema"
         )
         self.session.add(log)
         self.session.flush()
         return log
+
+    def autenticar_usuario(self, email: str, contrasena: str) -> Optional[UsuarioORM]:
+        """Verifica credenciales contra comparendos_fscr.usuarios usando SHA-256."""
+        if not email or not contrasena:
+            return None
+        hash_ingresado = hashlib.sha256(contrasena.strip().encode("utf-8")).hexdigest()
+        stmt = select(UsuarioORM).where(
+            func.lower(UsuarioORM.email) == func.lower(email.strip()),
+            UsuarioORM.contrasena_hash == hash_ingresado,
+            UsuarioORM.activo.is_(True)
+        )
+        return self.session.scalars(stmt).first()
+
+    def obtener_usuario_por_email(self, email: str) -> Optional[UsuarioORM]:
+        """Obtiene un usuario activo por su correo electrónico."""
+        if not email:
+            return None
+        stmt = select(UsuarioORM).where(
+            func.lower(UsuarioORM.email) == func.lower(email.strip()),
+            UsuarioORM.activo.is_(True)
+        )
+        return self.session.scalars(stmt).first()
 
     def recalcular_descuentos_comparendos_existentes(self) -> int:
         """

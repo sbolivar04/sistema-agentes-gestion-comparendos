@@ -33,6 +33,8 @@ def _obtener_mapa_entidades(sesion) -> Dict[str, str]:
 class SolicitudExtraccion(BaseModel):
     criterio: Optional[str] = Field(None, description="NIT o Placa específica a consultar. Si es vacío, procesa la flota completa.")
     tipo_consulta: Optional[str] = Field("NIT", description="NIT o Placa")
+    origen: Optional[str] = Field(None, description="Origen de la ejecución: MANUAL_MASIVO, MANUAL_INDIVIDUAL, PROGRAMADO_MASIVO")
+    usuario: Optional[str] = Field(None, description="Nombre o correo del usuario ejecutor que lanza la extracción")
 
 _ultimo_dispatch_ts: float = 0.0
 _ultimo_criterio_solicitado: Optional[str] = None
@@ -40,14 +42,22 @@ _ultimo_tipo_solicitado: str = "NIT"
 _cache_estado_run: Optional[Dict[str, Any]] = None
 _cache_estado_ts: float = 0.0
 
-def disparar_workflow_github(criterio: Optional[str] = None, tipo_consulta: str = "NIT") -> bool:
-    """Dispara el workflow extraccion_simit.yml en GitHub Actions vía API REST con protección anti-duplicados."""
+def disparar_workflow_github(
+    criterio: Optional[str] = None,
+    tipo_consulta: str = "NIT",
+    origen: Optional[str] = None,
+    usuario: Optional[str] = None
+) -> bool:
+    """Dispara el workflow extraccion_simit.yml en GitHub Actions vía API REST con protección anti-duplicados y trazabilidad de usuario y origen."""
     global _ultimo_dispatch_ts, _ultimo_criterio_solicitado, _ultimo_tipo_solicitado
     ahora = time.time()
     
     # Guardar último criterio solicitado para contextualizar mensajes
     _ultimo_criterio_solicitado = criterio.strip() if criterio else None
     _ultimo_tipo_solicitado = "PLACA" if (tipo_consulta or "").strip().upper() == "PLACA" else "NIT"
+
+    origen_final = origen or ("MANUAL_INDIVIDUAL" if _ultimo_criterio_solicitado else "MANUAL_MASIVO")
+    usuario_final = (usuario or "Sistema").strip()
 
     # Protección anti-duplicados: si se disparó hace menos de 25 segundos, evitar disparo redundante
     if ahora - _ultimo_dispatch_ts < 25:
@@ -65,7 +75,9 @@ def disparar_workflow_github(criterio: Optional[str] = None, tipo_consulta: str 
         "ref": "main",
         "inputs": {
             "criterio": _ultimo_criterio_solicitado or "",
-            "tipo_consulta": _ultimo_tipo_solicitado
+            "tipo_consulta": _ultimo_tipo_solicitado,
+            "origen": origen_final,
+            "usuario": usuario_final
         }
     }).encode("utf-8")
 
@@ -92,17 +104,24 @@ def lanzar_extraccion(solicitud: SolicitudExtraccion) -> Dict[str, Any]:
     """
     Dispara la extracción en vivo de SIMIT directamente en GitHub Actions y actualiza Supabase en la nube.
     """
+    origen_calculado = solicitud.origen or ("MANUAL_INDIVIDUAL" if (solicitud.criterio and solicitud.criterio.strip()) else "MANUAL_MASIVO")
+    usuario_calculado = (solicitud.usuario or "Sistema").strip()
+
     try:
         exito = disparar_workflow_github(
             criterio=solicitud.criterio,
-            tipo_consulta=solicitud.tipo_consulta or "NIT"
+            tipo_consulta=solicitud.tipo_consulta or "NIT",
+            origen=origen_calculado,
+            usuario=usuario_calculado
         )
         if exito:
             criterio_txt = f" de {solicitud.criterio}" if (solicitud.criterio and solicitud.criterio.strip()) else " de toda la flota"
             return {
                 "exitoso": True,
                 "mensaje": f"El agente inició la consulta de comparendos{criterio_txt} en el SIMIT.",
-                "modo": "remoto"
+                "modo": "remoto",
+                "origen": origen_calculado,
+                "usuario": usuario_calculado
             }
         else:
             return {
@@ -114,14 +133,26 @@ def lanzar_extraccion(solicitud: SolicitudExtraccion) -> Dict[str, Any]:
         try:
             if solicitud.criterio and solicitud.criterio.strip():
                 from agente_extraccion_simit.extractor_principal import ejecutar_extraccion
-                ejecutar_extraccion(solicitud.criterio.strip(), solicitud.tipo_consulta or "NIT", sin_interfaz=True, origen="MANUAL_INDIVIDUAL")
+                ejecutar_extraccion(
+                    solicitud.criterio.strip(),
+                    solicitud.tipo_consulta or "NIT",
+                    sin_interfaz=True,
+                    origen=origen_calculado,
+                    usuario=usuario_calculado
+                )
             else:
                 from agente_extraccion_simit.extractor_lote import ejecutar_extraccion_lote
-                ejecutar_extraccion_lote(sin_interfaz=True, origen="MANUAL_MASIVO")
+                ejecutar_extraccion_lote(
+                    sin_interfaz=True,
+                    origen=origen_calculado,
+                    usuario=usuario_calculado
+                )
             return {
                 "exitoso": True,
                 "mensaje": "Extracción ejecutada en modo local exitosamente.",
-                "modo": "local"
+                "modo": "local",
+                "origen": origen_calculado,
+                "usuario": usuario_calculado
             }
         except Exception as err_local:
             raise HTTPException(status_code=500, detail=f"Error al ejecutar extracción: {str(e)} / Local: {str(err_local)}")
