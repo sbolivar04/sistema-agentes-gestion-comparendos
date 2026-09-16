@@ -28,20 +28,65 @@ export function BarraNavegacion({
   const notificacionesRef = useRef(null)
   const perfilRef = useRef(null)
 
-  // Control de notificaciones leídas (persistido en localStorage del navegador)
+  // Identificador único del usuario activo para aislar el estado de notificaciones leídas por cuenta
+  const idUsuarioActual = usuario?.email 
+    ? usuario.email.toLowerCase().trim() 
+    : (usuario?.id ? `id_${usuario.id}` : 'predeterminado')
+
+  const claveStorageLeidas = `fscr_notificaciones_leidas_${idUsuarioActual}`
+  const claveStorageOrden = `fscr_notificaciones_orden_${idUsuarioActual}`
+
+  // Control de notificaciones leídas (persistido en localStorage aislado por usuario)
   const [leidas, setLeidas] = useState(() => {
     try {
-      const guardadas = localStorage.getItem('fscr_notificaciones_leidas')
-      return guardadas ? JSON.parse(guardadas) : []
+      const guardadas = localStorage.getItem(claveStorageLeidas)
+      if (guardadas) return JSON.parse(guardadas)
+
+      // Si no existe almacenamiento específico para este usuario pero sí el histórico global
+      // y el usuario es administrador, migrarlo a su cuenta individual
+      if (usuario?.rol === 'ADMINISTRADOR') {
+        const antiguas = localStorage.getItem('fscr_notificaciones_leidas')
+        if (antiguas) {
+          try {
+            localStorage.setItem(claveStorageLeidas, antiguas)
+            localStorage.removeItem('fscr_notificaciones_leidas')
+            return JSON.parse(antiguas)
+          } catch (e) {}
+        }
+      }
+      return []
     } catch (e) {
       return []
     }
   })
 
+  // Sincronizar el estado de notificaciones leídas al cambiar de usuario o perfil activo
+  useEffect(() => {
+    try {
+      const guardadas = localStorage.getItem(claveStorageLeidas)
+      if (guardadas) {
+        setLeidas(JSON.parse(guardadas))
+      } else {
+        if (usuario?.rol === 'ADMINISTRADOR') {
+          const antiguas = localStorage.getItem('fscr_notificaciones_leidas')
+          if (antiguas) {
+            localStorage.setItem(claveStorageLeidas, antiguas)
+            localStorage.removeItem('fscr_notificaciones_leidas')
+            setLeidas(JSON.parse(antiguas))
+            return
+          }
+        }
+        setLeidas([])
+      }
+    } catch (e) {
+      setLeidas([])
+    }
+  }, [claveStorageLeidas, usuario?.rol])
+
   // Orden persistente y estable de las notificaciones
   const [ordenClaves, setOrdenClaves] = useState(() => {
     try {
-      const guardado = localStorage.getItem('fscr_notificaciones_orden')
+      const guardado = localStorage.getItem(claveStorageOrden)
       return guardado ? JSON.parse(guardado) : []
     } catch (e) {
       return []
@@ -54,7 +99,7 @@ export function BarraNavegacion({
       if (prev.includes(clave)) return prev
       const nuevas = [...prev, clave]
       try {
-        localStorage.setItem('fscr_notificaciones_leidas', JSON.stringify(nuevas))
+        localStorage.setItem(claveStorageLeidas, JSON.stringify(nuevas))
       } catch (e) {}
       return nuevas
     })
@@ -297,6 +342,8 @@ export function BarraNavegacion({
     setLeidas([])
     setOrdenClaves([])
     try {
+      localStorage.removeItem(claveStorageLeidas)
+      localStorage.removeItem(claveStorageOrden)
       localStorage.removeItem('fscr_notificaciones_leidas')
       localStorage.removeItem('fscr_notificaciones_orden')
     } catch (e) {}
@@ -347,7 +394,7 @@ export function BarraNavegacion({
     ...alertasSync.map(s => `sync-${s.id}`)
   ]
 
-  // Limpieza automática de notificaciones leídas obsoletas de días anteriores
+  // Limpieza automática de notificaciones leídas obsoletas de días anteriores para el usuario activo
   useEffect(() => {
     // Si aún no se han cargado las alertas del API (primer render al refrescar), NO limpiar nada
     if (todasLasClaves.length === 0) return
@@ -364,20 +411,20 @@ export function BarraNavegacion({
 
       if (clavesValidas.length !== prev.length) {
         try {
-          localStorage.setItem('fscr_notificaciones_leidas', JSON.stringify(clavesValidas))
+          localStorage.setItem(claveStorageLeidas, JSON.stringify(clavesValidas))
         } catch (e) {}
         return clavesValidas
       }
       return prev
     })
-  }, [todasLasClaves.join(',')])
+  }, [todasLasClaves.join(','), claveStorageLeidas])
 
 
   const marcarTodasComoLeidas = () => {
     const conjuntoActualizado = Array.from(new Set([...leidas, ...todasLasClaves]))
     setLeidas(conjuntoActualizado)
     try {
-      localStorage.setItem('fscr_notificaciones_leidas', JSON.stringify(conjuntoActualizado))
+      localStorage.setItem(claveStorageLeidas, JSON.stringify(conjuntoActualizado))
     } catch (e) {}
   }
 
@@ -476,9 +523,10 @@ export function BarraNavegacion({
   // Limpiar cualquier orden antiguo congelado en localStorage
   useEffect(() => {
     try {
+      localStorage.removeItem(claveStorageOrden)
       localStorage.removeItem('fscr_notificaciones_orden')
     } catch (e) {}
-  }, [])
+  }, [claveStorageOrden])
 
   // Ordenamiento prioritario estricto:
   // 1. Notificaciones NO LEÍDAS siempre van de primero antes que las leídas.
