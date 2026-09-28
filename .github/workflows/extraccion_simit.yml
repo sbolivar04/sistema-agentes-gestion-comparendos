@@ -60,11 +60,16 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: |
           if [ -n "${{ inputs.criterio }}" ]; then
-            echo ">>> Ejecutando consulta específica para ${{ inputs.tipo_consulta }}: ${{ inputs.criterio }} (Origen: ${{ inputs.origen || 'MANUAL_INDIVIDUAL' }}, Usuario: ${{ inputs.usuario || 'Sistema' }})..."
-            python -c "
+            if [[ "${{ inputs.criterio }}" == *","* ]]; then
+              echo ">>> Ejecutando reintento masivo en lote continuo para múltiples entidades: ${{ inputs.criterio }} (Origen: ${{ inputs.origen || 'MANUAL_MASIVO' }}, Usuario: ${{ inputs.usuario || 'Sistema' }})..."
+              python agente_extraccion_simit/extractor_lote.py --criterios="${{ inputs.criterio }}" --origen="${{ inputs.origen || 'MANUAL_MASIVO' }}" --usuario="${{ inputs.usuario || 'Sistema' }}"
+            else
+              echo ">>> Ejecutando consulta específica para ${{ inputs.tipo_consulta }}: ${{ inputs.criterio }} (Origen: ${{ inputs.origen || 'MANUAL_INDIVIDUAL' }}, Usuario: ${{ inputs.usuario || 'Sistema' }})..."
+              python -c "
           from agente_extraccion_simit.extractor_principal import ejecutar_extraccion
           ejecutar_extraccion('${{ inputs.criterio }}', '${{ inputs.tipo_consulta }}', sin_interfaz=True, origen='${{ inputs.origen || 'MANUAL_INDIVIDUAL' }}', usuario='${{ inputs.usuario || 'Sistema' }}')
           "
+            fi
           else
             echo ">>> Ejecutando extracción automática para toda la flota corporativa (Origen: ${{ inputs.origen || 'PROGRAMADO_MASIVO' }}, Usuario: ${{ inputs.usuario || 'Sistema' }})..."
             python agente_extraccion_simit/extractor_lote.py --origen="${{ inputs.origen || 'PROGRAMADO_MASIVO' }}" --usuario="${{ inputs.usuario || 'Sistema' }}"

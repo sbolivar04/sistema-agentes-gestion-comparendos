@@ -18,15 +18,21 @@ def obtener_metricas_kpi() -> Dict[str, Any]:
     try:
         with obtener_sesion_bd() as sesion:
             # Determinación del valor efectivo a pagar:
-            # Si el usuario registró un valor pagado real mayor a cero en la gestión operativa (Paso 2),
-            # dicho valor prevalece sobre el descuento teórico.
+            # 1. Si el comparendo fue marcado como "De baja" (distribucion_pago == 'de_baja'),
+            #    el valor a pagar es $0 (exoneración total del comparendo).
+            # 2. Si el usuario registró un valor pagado real mayor a cero en la gestión operativa (Paso 2),
+            #    dicho valor prevalece sobre el descuento teórico.
+            # 3. Si no hay valor registrado ni es de baja, se usa el valor teórico con descuento de ley o pleno.
             val_teorico = case(
                 (ComparendoORM.aplica_descuento_50 == True, ComparendoORM.valor_con_descuento_50),
                 (ComparendoORM.aplica_descuento_25 == True, ComparendoORM.valor_con_descuento_25),
                 else_=ComparendoORM.valor_total
             )
 
+            es_de_baja = (GestionOperativaORM.distribucion_pago == 'de_baja')
+
             val_efectivo = case(
+                (es_de_baja, 0),
                 (
                     (GestionOperativaORM.valor_pagado.isnot(None)) & (GestionOperativaORM.valor_pagado > 0),
                     GestionOperativaORM.valor_pagado
@@ -39,6 +45,7 @@ def obtener_metricas_kpi() -> Dict[str, Any]:
             # el costo real total y nunca sea inferior al valor a pagar.
             total_simit = func.coalesce(ComparendoORM.valor_total, 0)
             total_efectivo = case(
+                (es_de_baja, total_simit),
                 (
                     (GestionOperativaORM.valor_pagado.isnot(None)) & (GestionOperativaORM.valor_pagado > total_simit),
                     GestionOperativaORM.valor_pagado
@@ -56,8 +63,8 @@ def obtener_metricas_kpi() -> Dict[str, Any]:
                     func.count(ComparendoORM.id).label("total_comparendos"),
                     func.count(case((ComparendoORM.estado_simit == 'Activo', 1))).label("total_activos"),
                     func.count(case((ComparendoORM.estado_simit == 'No activo', 1))).label("total_inactivos"),
-                    func.count(case(((ComparendoORM.estado_simit == 'Activo') & (ComparendoORM.aplica_descuento_50 == True), 1))).label("con_descuento_50"),
-                    func.count(case(((ComparendoORM.estado_simit == 'Activo') & (ComparendoORM.aplica_descuento_25 == True), 1))).label("con_descuento_25"),
+                    func.count(case(((ComparendoORM.estado_simit == 'Activo') & (ComparendoORM.aplica_descuento_50 == True) & (func.coalesce(GestionOperativaORM.distribucion_pago, '') != 'de_baja'), 1))).label("con_descuento_50"),
+                    func.count(case(((ComparendoORM.estado_simit == 'Activo') & (ComparendoORM.aplica_descuento_25 == True) & (func.coalesce(GestionOperativaORM.distribucion_pago, '') != 'de_baja'), 1))).label("con_descuento_25"),
                     func.count(case(((ComparendoORM.aplica_descuento_50 == False) & (ComparendoORM.aplica_descuento_25 == False), 1))).label("sin_descuento"),
                     func.coalesce(func.sum(total_efectivo), 0).label("deuda_total"),
                     func.coalesce(func.sum(case((ComparendoORM.estado_simit == 'Activo', total_efectivo), else_=0)), 0).label("deuda_activa"),

@@ -73,58 +73,56 @@ def guardar_resultado_extraccion(
 ) -> tuple[int, int]:
     """Persiste los resultados de la consulta en Supabase, registra auditoría y presenta el reporte en consola."""
     usuario_final = (usuario or "Sistema").strip()
-    if not resultado.exitoso:
-        print(f"\n[ERROR / RESPUESTA DE SIMIT]: {resultado.mensaje_error}")
-        try:
-            with obtener_sesion_bd() as sesion:
-                repo = RepositorioBaseDatos(sesion)
-                repo.registrar_log_extraccion(
-                    criterio=resultado.criterio_busqueda if hasattr(resultado, 'criterio_busqueda') else criterio,
-                    tipo_consulta=resultado.tipo_consulta.value if hasattr(resultado, 'tipo_consulta') and hasattr(resultado.tipo_consulta, 'value') else tipo_consulta,
-                    encontrados=0,
-                    nuevos=0,
-                    actualizados=0,
-                    exitoso=False,
-                    error=resultado.mensaje_error[:500] if resultado.mensaje_error else "Error de conexión o portal no disponible en SIMIT",
-                    id_lote=id_lote,
-                    origen=origen or ("PROGRAMADO_MASIVO" if id_lote else "MANUAL_INDIVIDUAL"),
-                    usuario=usuario_final
-                )
-        except Exception as e_log:
-            print(f"[AUDITORÍA] Advertencia: No se pudo registrar log de fallo en Supabase: {e_log}")
-        return 0, 0
+    criterio_final = getattr(resultado, "criterio_busqueda", criterio)
+    tipo_consulta_final = resultado.tipo_consulta.value if hasattr(resultado, 'tipo_consulta') and hasattr(resultado.tipo_consulta, 'value') else tipo_consulta
 
     if resultado.mensaje_error and "Requiere configurar" in resultado.mensaje_error:
         print(f"\n[AVISO DEL AGENTE]: El documento {criterio} requiere que se defina si es NIT o Cédula en la plataforma web. Se generó la alerta para su configuración.")
         return 0, 0
 
-    # Guardar en Base de Datos (Supabase)
     permitir_conciliacion = getattr(resultado, "permitir_conciliacion", True)
     if not permitir_conciliacion:
-        print(f"\n[PROTECCIÓN DE INTEGRIDAD] Se omitirá la conciliación para {resultado.criterio_busqueda} porque la extracción presentó fallos en alguna variante. Los comparendos activos preexistentes se mantienen protegidos.")
+        print(f"\n[PROTECCIÓN DE INTEGRIDAD] Se omitirá la conciliación para {criterio_final} porque la extracción presentó fallos en alguna variante. Los comparendos activos preexistentes se mantienen protegidos.")
 
-    print(f"\n[PERSISTENCIA] Guardando datos en Supabase Cloud (comparendos_fscr) para {resultado.criterio_busqueda}...")
     nuevos = 0
     actualizados = 0
-    with obtener_sesion_bd() as sesion:
-        repo = RepositorioBaseDatos(sesion)
-        nuevos, actualizados = repo.guardar_comparendos(
-            resultado.comparendos,
-            resultado.criterio_busqueda,
-            permitir_conciliacion=permitir_conciliacion
-        )
-        
-        repo.registrar_log_extraccion(
-            criterio=resultado.criterio_busqueda,
-            tipo_consulta=resultado.tipo_consulta.value if hasattr(resultado.tipo_consulta, 'value') else str(resultado.tipo_consulta),
-            encontrados=resultado.total_comparendos,
-            nuevos=nuevos,
-            actualizados=actualizados,
-            exitoso=True,
-            id_lote=id_lote,
-            origen=origen or ("PROGRAMADO_MASIVO" if id_lote else "MANUAL_INDIVIDUAL"),
-            usuario=usuario_final
-        )
+
+    # Guardar en Base de Datos (Supabase) si hay comparendos encontrados (incluso en extracciones parciales)
+    if getattr(resultado, "comparendos", None):
+        print(f"\n[PERSISTENCIA] Guardando datos en Supabase Cloud (comparendos_fscr) para {criterio_final}...")
+        try:
+            with obtener_sesion_bd() as sesion:
+                repo = RepositorioBaseDatos(sesion)
+                nuevos, actualizados = repo.guardar_comparendos(
+                    resultado.comparendos,
+                    criterio_final,
+                    permitir_conciliacion=permitir_conciliacion
+                )
+        except Exception as e_guardar:
+            print(f"[ERROR] Error al guardar comparendos para {criterio_final}: {e_guardar}")
+
+    # Registrar log de auditoría en Supabase con el estado real de la ejecución
+    try:
+        with obtener_sesion_bd() as sesion:
+            repo = RepositorioBaseDatos(sesion)
+            repo.registrar_log_extraccion(
+                criterio=criterio_final,
+                tipo_consulta=tipo_consulta_final,
+                encontrados=getattr(resultado, "total_comparendos", 0),
+                nuevos=nuevos,
+                actualizados=actualizados,
+                exitoso=bool(resultado.exitoso),
+                error=resultado.mensaje_error[:500] if (resultado.mensaje_error and not resultado.exitoso) else None,
+                id_lote=id_lote,
+                origen=origen or ("PROGRAMADO_MASIVO" if id_lote else "MANUAL_INDIVIDUAL"),
+                usuario=usuario_final
+            )
+    except Exception as e_log:
+        print(f"[AUDITORÍA] Advertencia: No se pudo registrar log de extracción en Supabase: {e_log}")
+
+    if not resultado.exitoso:
+        print(f"\n[ERROR / RESPUESTA DE SIMIT]: {resultado.mensaje_error}")
+        return nuevos, actualizados
 
     # Imprimir resumen
     print("\n" + "=" * 80)

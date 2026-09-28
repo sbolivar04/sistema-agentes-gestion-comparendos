@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react'
 import { apiBackend } from '../servicios/apiBackend'
+import { supabase } from '../servicios/clienteSupabase'
 import { useAutenticacion } from './ContextoAutenticacion'
 
 const ContextoFlota = createContext()
@@ -81,13 +82,17 @@ export function ProveedorFlota({ children }) {
     }
   }, [])
 
-  // Cargar comparendos con política de caché: no vuelve a descargar si ya están cargados en memoria
+  // Cargar comparendos con política reactiva: silencioso en segundo plano si ya hay datos
   const cargarComparendos = useCallback(async (forzar = false) => {
     if (!forzar && comparendos.length > 0) {
       return comparendos
     }
 
-    setCargandoComparendos(true)
+    // Solo mostrar spinner de carga completo en la primera carga inicial
+    if (comparendos.length === 0) {
+      setCargandoComparendos(true)
+    }
+
     try {
       const res = await apiBackend.obtenerComparendos({
         pagina: 1,
@@ -202,7 +207,62 @@ export function ProveedorFlota({ children }) {
     }).catch(() => {})
   }, [cargarTodo, iniciarMonitoreoProgreso])
 
-  // Refresco en segundo plano sólo de KPIs y alertas cuando la pestaña está visible
+  // Suscripción en Tiempo Real con Supabase Realtime (WebSockets)
+  useEffect(() => {
+    let temporizadorDebounce = null
+
+    const refrescarEnTiempoReal = () => {
+      // Debounce de 300ms para evitar múltiples recargas consecutivas si hay actualizaciones en lote
+      if (temporizadorDebounce) clearTimeout(temporizadorDebounce)
+      temporizadorDebounce = setTimeout(() => {
+        cargarTodo(true)
+      }, 300)
+    }
+
+    const canalRealtime = supabase
+      .channel('flota-cambios-tiempo-real')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'comparendos_fscr',
+          table: 'comparendos'
+        },
+        () => {
+          refrescarEnTiempoReal()
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'comparendos_fscr',
+          table: 'gestiones_operativas'
+        },
+        () => {
+          refrescarEnTiempoReal()
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'comparendos_fscr',
+          table: 'logs_extraccion'
+        },
+        () => {
+          refrescarEnTiempoReal()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      if (temporizadorDebounce) clearTimeout(temporizadorDebounce)
+      supabase.removeChannel(canalRealtime)
+    }
+  }, [cargarTodo])
+
+  // Refresco de respaldo en segundo plano y al volver a enfocar la pestaña
   useEffect(() => {
     const intervalo = setInterval(() => {
       if (document.visibilityState === 'visible' && !sincronizando) {
@@ -213,8 +273,7 @@ export function ProveedorFlota({ children }) {
 
     const alCambiarVisibilidad = () => {
       if (document.visibilityState === 'visible') {
-        cargarKPIs()
-        cargarAlertas()
+        cargarTodo(true)
       }
     }
     document.addEventListener('visibilitychange', alCambiarVisibilidad)
@@ -223,7 +282,7 @@ export function ProveedorFlota({ children }) {
       clearInterval(intervalo)
       document.removeEventListener('visibilitychange', alCambiarVisibilidad)
     }
-  }, [cargarKPIs, cargarAlertas, sincronizando])
+  }, [cargarKPIs, cargarAlertas, cargarTodo, sincronizando])
 
   // Limpieza del temporizador de sincronización en caso de desmontaje
   useEffect(() => {
@@ -245,13 +304,18 @@ export function ProveedorFlota({ children }) {
     const tipoConsultaLimpio = (typeof tipo_consulta === 'string') ? tipo_consulta.trim() : 'NIT'
     const nombreEntidadLimpio = (typeof nombreEntidad === 'string') ? nombreEntidad.trim() : ''
 
+    const esMultiples = criterioLimpio.includes(',')
+    const cantEntidades = esMultiples ? criterioLimpio.split(',').filter(Boolean).length : 1
+    const etiquetaDestino = esMultiples
+      ? `${cantEntidades} entidades con novedades`
+      : (nombreEntidadLimpio || (criterioLimpio ? `NIT ${criterioLimpio}` : 'toda la flota'))
+
     setSincronizando(true)
     setTipoMensajeSync('info')
-    const etiquetaDestino = nombreEntidadLimpio || (criterioLimpio ? `NIT ${criterioLimpio}` : 'toda la flota')
     setMensajeSync(criterioLimpio ? `Reintentando consulta de ${etiquetaDestino} en SIMIT...` : 'Iniciando agente de extracción para toda la flota...')
 
     try {
-      const origen = criterioLimpio ? 'MANUAL_INDIVIDUAL' : 'MANUAL_MASIVO'
+      const origen = esMultiples ? 'MANUAL_MASIVO' : (criterioLimpio ? 'MANUAL_INDIVIDUAL' : 'MANUAL_MASIVO')
       const nombreUsuario = usuario?.nombre || usuario?.email || 'Administrador'
       const res = await apiBackend.lanzarExtraccion(criterioLimpio, tipoConsultaLimpio, origen, nombreUsuario)
       if (res && res.exitoso) {

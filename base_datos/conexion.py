@@ -22,13 +22,37 @@ motor = create_engine(
 SesionLocal = sessionmaker(autocommit=False, autoflush=False, bind=motor)
 
 def inicializar_base_datos():
-    """Inicializa el esquema y crea todas las tablas en Supabase PostgreSQL."""
+    """Inicializa el esquema, crea todas las tablas y asegura la publicación en Supabase Realtime."""
     try:
         with motor.connect() as conn:
             conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {configuracion.DB_SCHEMA};"))
             conn.commit()
         Base.metadata.create_all(bind=motor)
-        logger.info(f"Base de datos Supabase inicializada correctamente (Esquema: {configuracion.DB_SCHEMA}).")
+
+        # Garantizar permisos y publicación en Supabase Realtime
+        with motor.connect() as conn:
+            try:
+                conn.execute(text(f"""
+                    GRANT USAGE ON SCHEMA {configuracion.DB_SCHEMA} TO anon, authenticated, service_role;
+                    GRANT SELECT ON ALL TABLES IN SCHEMA {configuracion.DB_SCHEMA} TO anon, authenticated, service_role;
+                    ALTER DEFAULT PRIVILEGES IN SCHEMA {configuracion.DB_SCHEMA} GRANT SELECT ON TABLES TO anon, authenticated, service_role;
+                    ALTER TABLE {configuracion.DB_SCHEMA}.comparendos REPLICA IDENTITY FULL;
+                    ALTER TABLE {configuracion.DB_SCHEMA}.gestiones_operativas REPLICA IDENTITY FULL;
+                    ALTER TABLE {configuracion.DB_SCHEMA}.logs_extraccion REPLICA IDENTITY FULL;
+                """))
+                conn.commit()
+            except Exception as e_perm:
+                logger.warning(f"Aviso al configurar permisos o replica identity: {e_perm}")
+
+            for tabla in ["comparendos", "gestiones_operativas", "logs_extraccion"]:
+                try:
+                    conn.execute(text(f"ALTER PUBLICATION supabase_realtime ADD TABLE {configuracion.DB_SCHEMA}.{tabla};"))
+                    conn.commit()
+                except Exception:
+                    # Si ya está añadida en la publicación de Supabase Realtime, omitir
+                    pass
+
+        logger.info(f"Base de datos Supabase inicializada y configurada con Realtime (Esquema: {configuracion.DB_SCHEMA}).")
     except Exception as e:
         logger.error(f"Error al inicializar la base de datos: {e}")
         raise e

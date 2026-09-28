@@ -104,7 +104,8 @@ def lanzar_extraccion(solicitud: SolicitudExtraccion) -> Dict[str, Any]:
     """
     Dispara la extracción en vivo de SIMIT directamente en GitHub Actions y actualiza Supabase en la nube.
     """
-    origen_calculado = solicitud.origen or ("MANUAL_INDIVIDUAL" if (solicitud.criterio and solicitud.criterio.strip()) else "MANUAL_MASIVO")
+    es_multiples = bool(solicitud.criterio and "," in solicitud.criterio)
+    origen_calculado = solicitud.origen or ("MANUAL_MASIVO" if es_multiples else ("MANUAL_INDIVIDUAL" if (solicitud.criterio and solicitud.criterio.strip()) else "MANUAL_MASIVO"))
     usuario_calculado = (solicitud.usuario or "Sistema").strip()
 
     try:
@@ -115,7 +116,13 @@ def lanzar_extraccion(solicitud: SolicitudExtraccion) -> Dict[str, Any]:
             usuario=usuario_calculado
         )
         if exito:
-            criterio_txt = f" de {solicitud.criterio}" if (solicitud.criterio and solicitud.criterio.strip()) else " de toda la flota"
+            if es_multiples:
+                cant = len([c for c in solicitud.criterio.split(",") if c.strip()])
+                criterio_txt = f" de {cant} entidades seleccionadas"
+            elif solicitud.criterio and solicitud.criterio.strip():
+                criterio_txt = f" de {solicitud.criterio}"
+            else:
+                criterio_txt = " de toda la flota"
             return {
                 "exitoso": True,
                 "mensaje": f"El agente inició la consulta de comparendos{criterio_txt} en el SIMIT.",
@@ -131,7 +138,16 @@ def lanzar_extraccion(solicitud: SolicitudExtraccion) -> Dict[str, Any]:
     except Exception as e:
         # Fallback opcional a ejecución local si falla la API de GitHub
         try:
-            if solicitud.criterio and solicitud.criterio.strip():
+            if es_multiples:
+                from agente_extraccion_simit.extractor_lote import ejecutar_extraccion_lote
+                criterios_lista = [c.strip() for c in solicitud.criterio.split(",") if c.strip()]
+                ejecutar_extraccion_lote(
+                    sin_interfaz=True,
+                    origen=origen_calculado,
+                    usuario=usuario_calculado,
+                    criterios_filtro=criterios_lista
+                )
+            elif solicitud.criterio and solicitud.criterio.strip():
                 from agente_extraccion_simit.extractor_principal import ejecutar_extraccion
                 ejecutar_extraccion(
                     solicitud.criterio.strip(),

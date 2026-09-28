@@ -21,14 +21,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ExtractorLote")
 
-def obtener_entidades_activas() -> list[dict]:
-    """Obtiene la lista de entidades y documentos activos desde la base de datos Supabase."""
+def obtener_entidades_activas(criterios_filtro: Optional[list[str]] = None) -> list[dict]:
+    """Obtiene la lista de entidades y documentos activos desde la base de datos Supabase, opcionalmente filtrada."""
     entidades = []
+    criterios_set = {c.strip().upper() for c in criterios_filtro if c and c.strip()} if criterios_filtro else None
+
     try:
         with obtener_sesion_bd() as sesion:
             repo = RepositorioBaseDatos(sesion)
             registros = repo.obtener_entidades_consulta(solo_activas=True)
             for r in registros:
+                crit_limpio = str(r.criterio_busqueda).strip().upper()
+                if criterios_set is not None and crit_limpio not in criterios_set:
+                    continue
                 entidades.append({
                     "id": r.id,
                     "empresa": r.nombre_entidad,
@@ -38,8 +43,21 @@ def obtener_entidades_activas() -> list[dict]:
     except Exception as e:
         logger.error(f"Error al consultar entidades activas en Supabase: {e}")
 
-    # Fallback de seguridad si la base de datos estuviera vacía
-    if not entidades:
+    # Si se especificaron criterios de filtro pero alguno no estaba en la BD, agregarlo directamente
+    if criterios_set:
+        criterios_encontrados = {str(e["criterio"]).strip().upper() for e in entidades}
+        for c in criterios_set:
+            if c not in criterios_encontrados:
+                es_num = c.isdigit()
+                entidades.append({
+                    "id": None,
+                    "empresa": f"Entidad {c}",
+                    "criterio": c,
+                    "tipo_documento": "NIT" if es_num else "PLACA"
+                })
+
+    # Fallback de seguridad si la base de datos estuviera vacía y no hay filtro
+    if not entidades and not criterios_filtro:
         entidades = [
             {"id": 1, "empresa": "FSCR Ingeniería S.A.S", "criterio": "900160091", "tipo_documento": "NIT"},
             {"id": 2, "empresa": "Servicios y Apoyo Total S.A.S.", "criterio": "901818414", "tipo_documento": "NIT"},
@@ -52,10 +70,12 @@ def ejecutar_extraccion_lote(
     sin_interfaz: bool = True,
     id_lote: Optional[str] = None,
     origen: str = "PROGRAMADO_MASIVO",
-    usuario: str = "Sistema"
+    usuario: str = "Sistema",
+    criterios_filtro: Optional[list[str]] = None
 ):
     """
     Ejecuta la extracción secuencial para todas las entidades activas de la flota corporativa
+    (o un subconjunto específico de criterios para reintento de fallos)
     en UNA SOLA SESIÓN CONTINUA de navegador, reutilizando la caja superior de búsqueda de SIMIT.
     """
     if not id_lote:
@@ -64,7 +84,10 @@ def ejecutar_extraccion_lote(
     usuario_final = (usuario or "Sistema").strip()
 
     logger.info("=" * 80)
-    logger.info(f" INICIANDO EXTRACCIÓN MASIVA CONTINUA PARA FLOTA CORPORATIVA (ID Lote: {id_lote})")
+    if criterios_filtro:
+        logger.info(f" REINTENTANDO EXTRACCIÓN MASIVA CONTINUA PARA {len(criterios_filtro)} ENTIDADES (ID Lote: {id_lote})")
+    else:
+        logger.info(f" INICIANDO EXTRACCIÓN MASIVA CONTINUA PARA FLOTA CORPORATIVA (ID Lote: {id_lote})")
     logger.info(f" Origen: {origen} | Usuario ejecutor: {usuario_final}")
     logger.info(f" Modo de navegación: {'Segundo plano (Headless)' if sin_interfaz else 'Visual en pantalla'}")
     logger.info("=" * 80)
@@ -73,8 +96,8 @@ def ejecutar_extraccion_lote(
     inicializar_base_datos()
 
     # 2. Cargar entidades desde Supabase
-    empresas = obtener_entidades_activas()
-    logger.info(f"Se encontraron {len(empresas)} entidades activas en Supabase para procesar.")
+    empresas = obtener_entidades_activas(criterios_filtro=criterios_filtro)
+    logger.info(f"Se encontraron {len(empresas)} entidades para procesar en esta sesión.")
 
     if not empresas:
         logger.warning("No hay entidades activas configuradas para consultar.")
@@ -181,13 +204,17 @@ def main():
     parser.add_argument("--con-interfaz", action="store_true", help="Navegación visual con interfaz gráfica")
     parser.add_argument("--origen", type=str, default="PROGRAMADO_MASIVO", help="Origen: MANUAL_MASIVO, PROGRAMADO_MASIVO, etc.")
     parser.add_argument("--usuario", type=str, default="Sistema", help="Nombre o correo del usuario ejecutor")
+    parser.add_argument("--criterios", type=str, default=None, help="Lista de criterios o NITs a reintentar separados por coma")
     args, _ = parser.parse_known_args()
+
+    criterios_filtro = [c.strip() for c in args.criterios.split(",") if c.strip()] if args.criterios else None
 
     sin_interfaz = not (args.visual or args.con_interfaz)
     ejecutar_extraccion_lote(
         sin_interfaz=sin_interfaz,
         origen=args.origen,
-        usuario=args.usuario
+        usuario=args.usuario,
+        criterios_filtro=criterios_filtro
     )
 
 if __name__ == "__main__":

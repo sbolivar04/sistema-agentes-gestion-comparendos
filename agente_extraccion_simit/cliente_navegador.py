@@ -220,16 +220,38 @@ class ClienteNavegadorSimit:
                             if parsed_f_notif:
                                 fecha_notif = parsed_f_notif
 
+                    # Cerrar cualquier pestaña emergente no deseada abierta por enlaces con target="_blank"
+                    for p in page.context.pages:
+                        if p != page:
+                            try:
+                                await p.close()
+                            except Exception:
+                                pass
+
                     # Hacer clic en el botón 'Volver' para retornar a la lista
                     volver_btn = await page.query_selector("button:has-text('Volver'), .btn-volver, a:has-text('Volver')")
                     if volver_btn and await volver_btn.is_visible():
                         await volver_btn.click(force=True)
-                        await page.wait_for_timeout(2500)
+                        await page.wait_for_timeout(2000)
                     else:
                         await page.go_back()
-                        await page.wait_for_timeout(2500)
+                        await page.wait_for_timeout(2000)
+
+                    # Verificar si la página logró retornar a la tabla de resultados o al buscador
+                    hay_tabla_o_buscador = await page.query_selector("mat-table, table.table, table, .mat-elevation-z8, input#txtBusqueda")
+                    if not hay_tabla_o_buscador or not await hay_tabla_o_buscador.is_visible():
+                        logger.warning("La navegación de detalle no retornó a la tabla de resultados. Reintentando retorno...")
+                        await page.go_back()
+                        await page.wait_for_timeout(1500)
                 except Exception as ex_detail:
                     logger.warning(f"No se pudo acceder a la vista detallada de {num_resolucion_val}: {ex_detail}")
+                    # En caso de error en detalle, asegurar que no queden pestañas secundarias
+                    for p in page.context.pages:
+                        if p != page:
+                            try:
+                                await p.close()
+                            except Exception:
+                                pass
 
             # Reglas legales:
             # 1. Comparendo físico (en vía con agente): la notificación se realiza en el acto de la infracción
@@ -283,22 +305,42 @@ class ClienteNavegadorSimit:
         for intento in range(1, max_intentos + 1):
             logger.info(f"[Intento {intento}/{max_intentos}] Ingresando criterio '{criterio_clean}' (Preferencia: {tipo_preferencia or 'Auto'}) en el buscador SIMIT...")
             
+            # 1. Cerrar cualquier pestaña emergente secundaria huérfana
+            for p in page.context.pages:
+                if p != page:
+                    try:
+                        await p.close()
+                    except Exception:
+                        pass
+
+            # 2. Verificar disponibilidad inmediata del buscador
+            input_elem = None
             try:
-                input_elem = await page.wait_for_selector(input_selector, state="visible", timeout=12000)
+                input_elem = await page.wait_for_selector(input_selector, state="visible", timeout=4000)
             except Exception:
-                logger.warning(f"[Intento {intento}] El input de búsqueda no estuvo disponible. Verificando retorno a la lista...")
+                logger.warning(f"[Intento {intento}] El input de búsqueda no estuvo visible de inmediato. Recuperando portal SIMIT...")
                 btn_volver = await page.query_selector("button:has-text('Volver'), .btn-volver, a:has-text('Volver')")
                 if btn_volver and await btn_volver.is_visible():
-                    await btn_volver.click(force=True)
-                    await page.wait_for_timeout(2000)
-                else:
-                    await self._cerrar_anuncios_iniciales(page)
-                    await page.goto(self.simit_url, wait_until="domcontentloaded", timeout=25000)
-                    await self._cerrar_anuncios_iniciales(page)
+                    try:
+                        await btn_volver.click(force=True)
+                        await page.wait_for_timeout(1500)
+                    except Exception:
+                        pass
+
+                # Si sigue sin estar el input, forzar recarga limpia a la URL base de SIMIT
+                input_check = await page.query_selector(input_selector)
+                if not input_check or not await input_check.is_visible():
+                    try:
+                        await self._cerrar_anuncios_iniciales(page)
+                        await page.goto(self.simit_url, wait_until="domcontentloaded", timeout=25000)
+                        await self._cerrar_anuncios_iniciales(page)
+                    except Exception as e_goto:
+                        logger.warning(f"Aviso al restaurar portal: {e_goto}")
+
                 try:
                     input_elem = await page.wait_for_selector(input_selector, state="visible", timeout=12000)
                 except Exception as e_inp:
-                    logger.error(f"[Intento {intento}] No se pudo acceder al buscador: {e_inp}")
+                    logger.error(f"[Intento {intento}] No se pudo acceder al buscador tras recuperación: {e_inp}")
                     continue
 
             # Asegurar input limpio y enfocado con el nuevo criterio
@@ -621,15 +663,16 @@ class ClienteNavegadorSimit:
                 )
             else:
                 # Si se encontraron comparendos en una variante pero otra falló, guardar los encontrados sin conciliar los existentes
+                # Se marca exitoso=False para que quede constancia del fallo parcial y se pueda reintentar
                 msg_aviso_parcial = (
-                    f"Extracción parcial: Se encontraron {len(comparendos_enriquecidos)} comparendos pero alguna variante falló ({detalles_fallas}). "
+                    f"Extracción parcial: Se encontraron {len(comparendos_enriquecidos)} comparendos pero alguna variante obligatoria falló ({detalles_fallas}). "
                     f"Conciliación omitida por protección."
                 )
                 logger.warning(f"[PROTECCIÓN DE INTEGRIDAD] {criterio_canonico}: {msg_aviso_parcial}")
                 return ResultadoConsultaSchema(
                     criterio_busqueda=criterio_canonico,
                     tipo_consulta=tipo_enum,
-                    exitoso=True,
+                    exitoso=False,
                     total_comparendos=len(comparendos_enriquecidos),
                     total_valor_total=total_nominal,
                     total_valor_con_descuento_vigente=total_con_descuento,
@@ -728,10 +771,29 @@ class ClienteNavegadorSimit:
                 await self._cerrar_anuncios_iniciales(page)
 
                 # 2. Consultar secuencialmente cada entidad en la misma pestaña
+                input_selector = "input#txtBusqueda, input[name='txtBusqueda'], input[placeholder*='documento'], input[placeholder*='Placa']"
                 for idx, item in enumerate(lista_consultas, 1):
                     criterio = str(item.get("criterio") or item.get("nit") or item.get("placa") or "")
                     tipo_doc = str(item.get("tipo_documento") or item.get("tipo_consulta") or ("NIT" if criterio.isdigit() else "PLACA"))
                     empresa = item.get("empresa") or item.get("nombre_entidad") or criterio
+
+                    # Cerrar cualquier pestaña emergente adicional antes de iniciar la entidad
+                    for p in context.pages:
+                        if p != page:
+                            try:
+                                await p.close()
+                            except Exception:
+                                pass
+
+                    # Verificación preventiva: Si el buscador no está visible o la URL no es SIMIT, restablecer portal
+                    try:
+                        input_check = await page.query_selector(input_selector)
+                        if not input_check or not await input_check.is_visible() or "/simit/" not in page.url:
+                            logger.info(f"Restableciendo página oficial de SIMIT antes de consultar {empresa} ({criterio})...")
+                            await page.goto(self.simit_url, wait_until="domcontentloaded", timeout=30000)
+                            await self._cerrar_anuncios_iniciales(page)
+                    except Exception as e_prev:
+                        logger.warning(f"Aviso al verificar estado del portal antes de {criterio}: {e_prev}")
 
                     logger.info(f"\n[{idx}/{len(lista_consultas)}] Consultando {empresa} ({tipo_doc}: {criterio}) en la misma sesión continua...")
                     resultado = await self._consultar_criterio_en_pagina(page, criterio, tipo_doc, api_holder)

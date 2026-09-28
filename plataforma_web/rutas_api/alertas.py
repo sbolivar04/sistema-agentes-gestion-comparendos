@@ -1,11 +1,11 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any, List
 from datetime import datetime, date, timedelta, timezone
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 
 from configuracion import formatear_fecha_colombia, obtener_ahora_colombia, ZONA_HORARIA_COLOMBIA
 from base_datos.conexion import obtener_sesion_bd
-from base_datos.modelos import ComparendoORM, LogExtraccionORM
+from base_datos.modelos import ComparendoORM, LogExtraccionORM, GestionOperativaORM
 from agente_extraccion_simit.festivos_colombia import contar_dias_habiles
 from plataforma_web.rutas_api.comparendos import serializar_comparendo
 
@@ -50,10 +50,12 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
             # 2. Comparendos Activos con Descuento Vigente (Semáforo de vencimiento)
             # Solo aplica a comparendos que NO sean nuevos recién ingresados, para no alertar de vencimiento
             # en vez de alertar la aparición del nuevo comparendo en el SIMIT.
-            stmt_descuentos = select(ComparendoORM).where(
-                ComparendoORM.estado_simit == 'Activo'
+            stmt_descuentos = select(ComparendoORM).outerjoin(
+                GestionOperativaORM, ComparendoORM.id == GestionOperativaORM.comparendo_id
             ).where(
-                (ComparendoORM.aplica_descuento_50 == True) | (ComparendoORM.aplica_descuento_25 == True)
+                ComparendoORM.estado_simit == 'Activo',
+                (ComparendoORM.aplica_descuento_50 == True) | (ComparendoORM.aplica_descuento_25 == True),
+                func.coalesce(GestionOperativaORM.distribucion_pago, '') != 'de_baja'
             )
             comparendos_desc = sesion.scalars(stmt_descuentos).all()
 
@@ -294,6 +296,7 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                         nombres_fallidos = [entidades_dict.get(c, c) for c in criterios_fallidos]
                         primer_fallido = items_fallidos_pendientes[0]
                         tipo_fallido = primer_fallido.tipo_consulta.value if hasattr(primer_fallido.tipo_consulta, "value") else (primer_fallido.tipo_consulta or "NIT")
+                        todos_criterios_csv = ",".join(criterios_fallidos)
                         
                         notificaciones_sincronizacion.append({
                             "id": f"sync-err-{id_identificador}",
@@ -301,12 +304,12 @@ def obtener_alertas_sistema() -> Dict[str, Any]:
                             "nivel_alerta": "ROJO",
                             "titulo": f"Fallo en {fallidos} entidades de la flota",
                             "empresa": "Flota Corporativa FSCR",
-                            "criterio": criterios_fallidos[0],
+                            "criterio": ", ".join(criterios_fallidos),
                             "tipo_consulta": tipo_fallido,
                             "mensaje": f"Fallaron en SIMIT: {', '.join(nombres_fallidos)}. Reintente la consulta.",
                             "fecha": fecha_formateada,
                             "es_error": True,
-                            "criterio_reintento": criterios_fallidos[0]
+                            "criterio_reintento": todos_criterios_csv
                         })
                 else:
                     # --- CONSULTA INDIVIDUAL (1 solo vehículo o empresa / NIT) ---

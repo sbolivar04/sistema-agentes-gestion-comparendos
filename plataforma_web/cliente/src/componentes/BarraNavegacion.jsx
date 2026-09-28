@@ -746,7 +746,7 @@ export function BarraNavegacion({
                                 <span className="doc-entidad-c">
                                   {sync.tipo_consulta === 'PLACA'
                                     ? (sync.criterio?.toString().startsWith('Placa') ? sync.criterio : `Placa ${sync.criterio}`)
-                                    : (sync.criterio?.toString().startsWith('NIT') || sync.criterio?.toString().includes('entidades') || sync.criterio?.toString().includes('/')
+                                    : (sync.criterio?.toString().startsWith('NIT') || sync.criterio?.toString().includes('entidades') || sync.criterio?.toString().includes('/') || sync.criterio?.toString().includes(',')
                                         ? sync.criterio
                                         : `NIT ${sync.criterio}`)}
                                 </span>
@@ -759,7 +759,7 @@ export function BarraNavegacion({
                                   </span>
                                 </EtiquetaTooltip>
                                 {esError ? (
-                                  <EtiquetaTooltip texto="Volver a intentar la consulta en el SIMIT">
+                                  <EtiquetaTooltip texto="Volver a intentar la consulta de las entidades fallidas en el SIMIT">
                                     <span 
                                       className="enlace-ver-c reintentar"
                                       onClick={(e) => {
@@ -768,8 +768,10 @@ export function BarraNavegacion({
                                         setMostrarNotificaciones(false)
                                         if (alSincronizar) {
                                           const criterioLimpio = (sync.criterio_reintento || sync.criterio || '').toString().replace(/^(NIT|Placa)\s*/i, '').trim()
-                                          const tipoConsulta = (sync.tipo_consulta === 'PLACA') ? 'PLACA' : 'NIT'
-                                          alSincronizar(criterioLimpio, tipoConsulta, sync.empresa)
+                                          const esMultiples = criterioLimpio.includes(',')
+                                          const tipoConsulta = esMultiples ? 'NIT' : ((sync.tipo_consulta === 'PLACA') ? 'PLACA' : 'NIT')
+                                          const nombreObjetivo = esMultiples ? 'las entidades con novedades' : sync.empresa
+                                          alSincronizar(criterioLimpio, tipoConsulta, nombreObjetivo)
                                         }
                                       }}
                                     >

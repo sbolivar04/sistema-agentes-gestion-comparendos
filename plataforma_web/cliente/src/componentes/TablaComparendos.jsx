@@ -15,7 +15,7 @@ export function TablaComparendos({
   filtroEstadoExterno = null,
   versionFiltroEstadoExterno = 0
 }) {
-  const { comparendos: todosComparendos, cargandoComparendos: cargando, cargarComparendos, cargarKPIs } = useFlota()
+  const { comparendos: todosComparendos, cargandoComparendos: cargando, versionComparendos, cargarComparendos, cargarKPIs } = useFlota()
   const [paginaActual, setPaginaActual] = useState(1)
 
   // Paginación por defecto en 5
@@ -65,7 +65,7 @@ export function TablaComparendos({
         console.warn('Error al cargar mapa de gestiones desde Supabase:', err)
       })
     return () => { activo = false }
-  }, [versionGestion])
+  }, [versionGestion, versionComparendos])
 
   // Obtener subestado operativo y color del micro-indicador para el botón de gestión
   const obtenerSubestadoGestion = (c) => {
@@ -96,24 +96,38 @@ export function TablaComparendos({
         }
       }
 
+      const distPago = datos.distribucionPago || datos.distribucion_pago
+      const esDeBaja = distPago === 'de_baja'
+
       // Verificación estricta de Paso 1 completo:
-      // Requiere nombre, cédula, asignación de pago y ambos soportes obligatorios (correo y autorización firmada)
+      // Si es "De baja", solo requiere el soporte de aprobación por correo
+      // Si no es de baja, requiere nombre, cédula, asignación de pago y ambos soportes obligatorios (correo y autorización firmada)
+      const digitosDoc = String(datos.responsableDocumento || datos.responsable_documento || '').replace(/\D/g, '')
+      const cedulaValida = esDeBaja
+        ? (digitosDoc.length === 0 || (digitosDoc.length >= 6 && digitosDoc.length <= 10))
+        : (digitosDoc.length >= 6 && digitosDoc.length <= 10)
+
       const paso1Completo = Boolean(
         (datos.paso1Completo === true || datos.paso1_completo === true) || (
-          (datos.responsableNombre || datos.responsable_nombre)?.trim()?.length > 0 &&
-          String(datos.responsableDocumento || datos.responsable_documento || '').replace(/\D/g, '').length > 0 &&
-          (datos.distribucionPago || datos.distribucion_pago) &&
-          (datos.soporteCorreo || datos.soporte_correo || datos.tiene_soporte_correo) &&
-          (datos.soporteFirma || datos.soporte_firma || datos.tiene_soporte_firma)
+          esDeBaja
+            ? Boolean((datos.soporteCorreo || datos.soporte_correo || datos.tiene_soporte_correo) && cedulaValida)
+            : (
+                (datos.responsableNombre || datos.responsable_nombre)?.trim()?.length > 0 &&
+                cedulaValida &&
+                distPago &&
+                (datos.soporteCorreo || datos.soporte_correo || datos.tiene_soporte_correo) &&
+                (datos.soporteFirma || datos.soporte_firma || datos.tiene_soporte_firma)
+              )
         )
       )
 
       // Verificación de Paso 2 completo:
-      // Requiere Paso 1 completo + valor pagado registrado + fecha de pago + factura/recibo oficial adjunto
+      // Si es de baja, se cumple automáticamente al completar Paso 1
       const paso2Completo = Boolean(
         paso1Completo && (
+          esDeBaja ||
           (datos.paso2Completo === true || datos.paso2_completo === true) || (
-            (datos.valorPagado || datos.valor_pagado) && 
+            (datos.valorPagado || datos.valor_pagado) &&
             Number(String(datos.valorPagado || datos.valor_pagado).replace(/\D/g, '')) > 0 &&
             (datos.fechaPago || datos.fecha_pago) &&
             (datos.soporteFactura || datos.soporte_factura || datos.tiene_soporte_factura)
@@ -135,7 +149,6 @@ export function TablaComparendos({
       const subestadoCod = datos.subestadoCodigo || datos.subestado_codigo || 'sin_gestion'
       const nombreResp = (datos.responsableNombre || datos.responsable_nombre || '').trim()
       const docResp = String(datos.responsableDocumento || datos.responsable_documento || '').replace(/\D/g, '').trim()
-      const distPago = datos.distribucionPago || datos.distribucion_pago
       const tieneSoporte1 = Boolean(
         datos.soporteCorreo || datos.soporte_correo || datos.tiene_soporte_correo ||
         datos.soporteFirma || datos.soporte_firma || datos.tiene_soporte_firma
@@ -161,20 +174,27 @@ export function TablaComparendos({
         }
       }
 
-      // 2. NARANJA: Paso 3 activo (Comparendo pagado físicamente, en espera de descargue SIMIT)
+      // 2. NARANJA: Paso 3 activo (Comparendo pagado físicamente o de baja, en espera de descargue SIMIT)
       if (faseActualNum === 3 || subestadoCod === 'pagado_esperando_descargue') {
         return {
           colorCodigo: 'naranja',
-          etiqueta: 'Pagado • Esperando Descargue SIMIT',
-          tooltip: 'Gestión operativa • Pagado (Esperando descargue SIMIT)'
+          etiqueta: esDeBaja ? 'De Baja • Esperando Descargue SIMIT' : 'Pagado • Esperando Descargue SIMIT',
+          tooltip: esDeBaja ? 'Gestión operativa • De Baja (Esperando descargue SIMIT)' : 'Gestión operativa • Pagado (Esperando descargue SIMIT)'
         }
       }
 
-      // 3. AMARILLO: Paso 2 activo o Paso 1 completado (En trámite de pago)
+      // 3. AMARILLO: Paso 2 activo o Paso 1 completado (En trámite de pago o de baja)
       if (faseActualNum === 2 || paso1Completo) {
+        if (esDeBaja) {
+          return {
+            colorCodigo: 'amarillo',
+            etiqueta: 'Fase 2: Trámite de Baja ($0)',
+            tooltip: 'Gestión operativa • En trámite de baja ($0)'
+          }
+        }
         const valNum = datos.valorPagado || datos.valor_pagado
-        const montoTexto = (datos.fechaPago || datos.fecha_pago) && valNum 
-          ? ` ($${Number(String(valNum).replace(/\D/g, '')).toLocaleString('es-CO')})` 
+        const montoTexto = (datos.fechaPago || datos.fecha_pago) && valNum
+          ? ` ($${Number(String(valNum).replace(/\D/g, '')).toLocaleString('es-CO')})`
           : ''
         return {
           colorCodigo: 'amarillo',
@@ -185,8 +205,10 @@ export function TablaComparendos({
 
       // 4. AZUL: Paso 1 iniciado o en progreso (incompleto)
       if (tieneAlgoPaso1) {
-        let detalleFase1 = 'En asignación de conductor'
-        if (nombreResp && tieneSoporte1) {
+        let detalleFase1 = esDeBaja ? 'En trámite de baja' : 'En asignación de conductor'
+        if (esDeBaja) {
+          detalleFase1 = 'Pendiente aprobación por correo'
+        } else if (nombreResp && tieneSoporte1) {
           detalleFase1 = `En revisión de firmas (${nombreResp.split(' ')[0]})`
         } else if (nombreResp) {
           detalleFase1 = `En asignación (${nombreResp.split(' ')[0]})`
@@ -196,7 +218,7 @@ export function TablaComparendos({
 
         return {
           colorCodigo: 'azul',
-          etiqueta: 'Fase 1: Asignación y Firmas',
+          etiqueta: esDeBaja ? 'Fase 1: En Trámite de Baja' : 'Fase 1: Asignación y Firmas',
           tooltip: `Gestión operativa • ${detalleFase1} (Paso 1)`
         }
       }
@@ -260,8 +282,27 @@ export function TablaComparendos({
     return `Descuento vigente hasta el ${formatearFecha(c.fecha_limite_descuento)}`
   }
 
-  // Renderizar el valor a pagar con el distintivo definitivo "✓ Real pagado" (Opción 3 elegida)
-  const renderizarDistintivoPagoReal = (valor, esReal) => {
+  // Renderizar el valor a pagar con el distintivo definitivo "✓ Real pagado" o "✓ De baja ($0)"
+  const renderizarDistintivoPagoReal = (valor, esReal, esDeBaja = false) => {
+    if (esDeBaja) {
+      return (
+        <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.25 }}>
+          <span style={{ color: '#ea580c' }}>$0</span>
+          <span style={{
+            fontSize: '0.67rem',
+            fontWeight: 600,
+            color: '#ea580c',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.2rem',
+            marginTop: '2px'
+          }}>
+            ✓ De baja ($0)
+          </span>
+        </div>
+      )
+    }
+
     const textoValor = `$${Math.round(Number(valor || 0)).toLocaleString('es-CO')}`
     if (!esReal) {
       return textoValor
@@ -581,13 +622,18 @@ export function TablaComparendos({
 
                 // Prevalencia reactiva del valor real pagado en la gestión operativa (Paso 2)
                 const gestionFila = mapaGestiones[c.id]
+                const distPagoFila = gestionFila?.distribucion_pago || gestionFila?.distribucionPago
+                const esDeBajaFila = distPagoFila === 'de_baja'
+
                 const valPagadoGestion = gestionFila?.valor_pagado ?? gestionFila?.valorPagado
-                const tienePagoReal = (valPagadoGestion !== undefined && valPagadoGestion !== null && Number(String(valPagadoGestion).replace(/\D/g, '')) > 0) || Boolean(c.es_valor_real_pagado)
+                const tienePagoReal = !esDeBajaFila && ((valPagadoGestion !== undefined && valPagadoGestion !== null && Number(String(valPagadoGestion).replace(/\D/g, '')) > 0) || Boolean(c.es_valor_real_pagado))
                 const esRealVisual = tienePagoReal
 
-                const valorAPagarFinal = (valPagadoGestion !== undefined && valPagadoGestion !== null && Number(String(valPagadoGestion).replace(/\D/g, '')) > 0)
-                  ? Number(String(valPagadoGestion).replace(/\D/g, ''))
-                  : (c.valor_a_pagar || 0)
+                const valorAPagarFinal = esDeBajaFila
+                  ? 0
+                  : ((valPagadoGestion !== undefined && valPagadoGestion !== null && Number(String(valPagadoGestion).replace(/\D/g, '')) > 0)
+                      ? Number(String(valPagadoGestion).replace(/\D/g, ''))
+                      : (c.valor_a_pagar || 0))
 
                 const valorSimitBase = Number(c.valor_total_simit ?? c.valor_total ?? 0)
 
@@ -598,9 +644,11 @@ export function TablaComparendos({
                 const valorTotalFinal = tieneRecargo ? valorAPagarFinal : Number(c.valor_total || valorSimitBase)
                 const recargoMora = tieneRecargo ? (valorAPagarFinal - valorSimitBase) : (c.recargo_mora || 0)
 
-                const ahorroDisponibleFinal = tienePagoReal
-                  ? Math.max(0, valorTotalFinal - valorAPagarFinal)
-                  : (c.ahorro_disponible || 0)
+                const ahorroDisponibleFinal = esDeBajaFila
+                  ? valorTotalFinal
+                  : (tienePagoReal
+                      ? Math.max(0, valorTotalFinal - valorAPagarFinal)
+                      : (c.ahorro_disponible || 0))
 
                 const comparendoEnriquecido = {
                   ...c,
@@ -610,7 +658,8 @@ export function TablaComparendos({
                   recargo_mora: recargoMora,
                   valor_a_pagar: valorAPagarFinal,
                   ahorro_disponible: ahorroDisponibleFinal,
-                  es_valor_real_pagado: tienePagoReal
+                  es_valor_real_pagado: tienePagoReal || esDeBajaFila,
+                  es_de_baja: esDeBajaFila
                 }
 
                 return (
@@ -640,7 +689,7 @@ export function TablaComparendos({
                       <EtiquetaTooltip texto={c.descripcion_infraccion || `Infracción código ${c.codigo_infraccion}`}>
                         <strong
                           style={{
-                              color: 'var(--color-primario)',
+                            color: 'var(--color-primario)',
                             cursor: 'help',
                             display: 'inline-block',
                             textDecoration: 'underline dotted',
@@ -666,17 +715,35 @@ export function TablaComparendos({
                       )}
                     </td>
                     <td>
-                      <EtiquetaTooltip texto={obtenerTextoTooltipDescuento(c)} posicion="arriba">
-                        <span className={`chip-descuento ${c.etiqueta_descuento?.includes('Sin Notificar') ? 'd50-pendiente' :
-                          c.etiqueta_descuento?.includes('50') ? 'd50' :
-                            c.etiqueta_descuento?.includes('25') ? 'd25' : 'sin'
-                          }`} style={{ whiteSpace: 'nowrap', cursor: 'help' }}>
-                          {c.etiqueta_descuento}
-                        </span>
-                      </EtiquetaTooltip>
+                      {esDeBajaFila ? (
+                        <EtiquetaTooltip texto="Comparendo exonerado o tramitado de baja • Ahorro del 100% de la infracción" posicion="arriba">
+                          <span 
+                            className="chip-descuento" 
+                            style={{ 
+                              background: 'rgba(234, 88, 12, 0.12)', 
+                              color: '#ea580c', 
+                              border: '1px solid rgba(234, 88, 12, 0.35)',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap', 
+                              cursor: 'help' 
+                            }}
+                          >
+                            100% (De baja)
+                          </span>
+                        </EtiquetaTooltip>
+                      ) : (
+                        <EtiquetaTooltip texto={obtenerTextoTooltipDescuento(c)} posicion="arriba">
+                          <span className={`chip-descuento ${c.etiqueta_descuento?.includes('Sin Notificar') ? 'd50-pendiente' :
+                            c.etiqueta_descuento?.includes('50') ? 'd50' :
+                              c.etiqueta_descuento?.includes('25') ? 'd25' : 'sin'
+                            }`} style={{ whiteSpace: 'nowrap', cursor: 'help' }}>
+                            {c.etiqueta_descuento}
+                          </span>
+                        </EtiquetaTooltip>
+                      )}
                     </td>
-                    <td style={{ fontWeight: 700, color: ahorroDisponibleFinal > 0 ? 'var(--color-exito)' : 'inherit', whiteSpace: 'nowrap' }}>
-                      {renderizarDistintivoPagoReal(valorAPagarFinal, esRealVisual)}
+                    <td style={{ fontWeight: 700, color: (ahorroDisponibleFinal > 0 || esDeBajaFila) ? 'var(--color-exito)' : 'inherit', whiteSpace: 'nowrap' }}>
+                      {renderizarDistintivoPagoReal(valorAPagarFinal, esRealVisual, esDeBajaFila)}
                     </td>
                     <td>
                       <span className={`chip-estado ${c.estado_simit === 'Activo' ? 'activo' : 'inactivo'}`}>
