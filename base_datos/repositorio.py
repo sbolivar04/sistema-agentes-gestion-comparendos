@@ -45,9 +45,17 @@ class RepositorioBaseDatos:
                 base_nit, dv = descomponer_nit(criterio_limpio)
                 criterios_conciliacion = list({criterio_limpio, base_nit, f"{base_nit}{dv}"})
 
+            # Si el criterio es una placa vehicular (<= 6 caracteres alfanuméricos),
+            # la conciliación debe considerar comparendos asociados a la placa o al criterio
+            es_placa_criterio = len(criterio_limpio) <= 6 and not criterio_limpio.isdigit()
+            if es_placa_criterio:
+                condicion_conciliacion = (ComparendoORM.placa == criterio_limpio) | (ComparendoORM.criterio_busqueda.in_(criterios_conciliacion))
+            else:
+                condicion_conciliacion = ComparendoORM.criterio_busqueda.in_(criterios_conciliacion)
+
             comparendos_db_activos = self.session.execute(
                 select(ComparendoORM)
-                .where(ComparendoORM.criterio_busqueda.in_(criterios_conciliacion))
+                .where(condicion_conciliacion)
                 .where(ComparendoORM.estado_simit == 'Activo')
             ).scalars().all()
             

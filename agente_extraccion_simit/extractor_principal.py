@@ -86,7 +86,12 @@ def guardar_resultado_extraccion(
         print(f"\n[AVISO DEL AGENTE]: El documento {criterio} requiere que se defina si es NIT o Cédula en la plataforma web. Se generó la alerta para su configuración.")
         return 0, 0
 
-    permitir_conciliacion = getattr(resultado, "permitir_conciliacion", True)
+    permitir_conciliacion = bool(
+        resultado 
+        and resultado.exitoso 
+        and getattr(resultado, "permitir_conciliacion", True)
+        and getattr(resultado, "extraccion_completa", True)
+    )
     if numero_comparendo_objetivo:
         permitir_conciliacion = False
 

@@ -58,7 +58,8 @@ class ClienteNavegadorSimit:
         self,
         page,
         criterio_clean: str,
-        numero_comparendo_objetivo: Optional[str] = None
+        numero_comparendo_objetivo: Optional[str] = None,
+        api_holder: Optional[dict] = None
     ) -> List[ComparendoSchema]:
         """
         Extrae todos los comparendos y multas visibles en la tabla de resultados de SIMIT,
@@ -173,18 +174,22 @@ class ClienteNavegadorSimit:
             direccion_val = None
             fuente_val = None
 
-            # Buscar enlace del comparendo para ingresar a la vista 'Detalle'
-            link_elem = await tds[0].query_selector("a, button, [role='link']")
-            if not link_elem:
-                link_elem = await row.query_selector("a, button, [role='link']")
-            if not link_elem:
-                link_elem = await page.query_selector(f"a:has-text('{num_raw}'), button:has-text('{num_raw}')")
+            # Buscar enlace del comparendo para ingresar a la vista 'Detalle' solo si es consulta dirigida puntual
+            link_elem = None
+            if objetivo_limpio:
+                link_elem = await tds[0].query_selector("a, button, [role='link']")
+                if not link_elem:
+                    link_elem = await row.query_selector("a, button, [role='link']")
+                if not link_elem:
+                    link_elem = await page.query_selector(f"a:has-text('{num_raw}'), button:has-text('{num_raw}')")
 
-            if link_elem:
+            # Navegar a la vista 'Detalle' ÚNICAMENTE en consultas puntuales de un comparendo específico.
+            # En consultas completas de placa o masivas, se extrae directamente de la tabla para proteger el DOM de Angular.
+            if objetivo_limpio and link_elem:
                 try:
-                    logger.info(f"Navegando a la vista detallada del comparendo (Resolución {num_resolucion_val})...")
+                    logger.info(f"Navegando a la vista detallada del comparendo objetivo (Resolución {num_resolucion_val})...")
                     await link_elem.click()
-                    await page.wait_for_timeout(3500)
+                    await page.wait_for_timeout(3000)
 
                     detalle_data = await page.evaluate('''() => {
                         const res = {};
@@ -247,7 +252,6 @@ class ClienteNavegadorSimit:
                             if parsed_f_notif:
                                 fecha_notif = parsed_f_notif
 
-                    # Cerrar cualquier pestaña emergente no deseada abierta por enlaces con target="_blank"
                     for p in page.context.pages:
                         if p != page:
                             try:
@@ -255,30 +259,15 @@ class ClienteNavegadorSimit:
                             except Exception:
                                 pass
 
-                    # Hacer clic en el botón 'Volver' para retornar a la lista
                     volver_btn = await page.query_selector("button:has-text('Volver'), .btn-volver, a:has-text('Volver')")
                     if volver_btn and await volver_btn.is_visible():
                         await volver_btn.click(force=True)
-                        await page.wait_for_timeout(2000)
+                        await page.wait_for_timeout(1500)
                     else:
-                        await page.go_back()
-                        await page.wait_for_timeout(2000)
-
-                    # Verificar si la página logró retornar a la tabla de resultados o al buscador
-                    hay_tabla_o_buscador = await page.query_selector("mat-table, table.table, table, .mat-elevation-z8, input#txtBusqueda")
-                    if not hay_tabla_o_buscador or not await hay_tabla_o_buscador.is_visible():
-                        logger.warning("La navegación de detalle no retornó a la tabla de resultados. Reintentando retorno...")
                         await page.go_back()
                         await page.wait_for_timeout(1500)
                 except Exception as ex_detail:
-                    logger.warning(f"No se pudo acceder a la vista detallada de {num_resolucion_val}: {ex_detail}")
-                    # En caso de error en detalle, asegurar que no queden pestañas secundarias
-                    for p in page.context.pages:
-                        if p != page:
-                            try:
-                                await p.close()
-                            except Exception:
-                                pass
+                    logger.warning(f"Aviso al acceder a la vista detallada de {num_resolucion_val}: {ex_detail}")
 
             # Reglas legales:
             # 1. Comparendo físico (en vía con agente): la notificación se realiza en el acto de la infracción
@@ -312,6 +301,32 @@ class ClienteNavegadorSimit:
             if objetivo_limpio:
                 logger.info(f"Comparendo objetivo {objetivo_limpio} extraído exitosamente de la tabla SIMIT.")
                 break
+
+        # Enriquecimiento en memoria con datos de la API interceptada de SIMIT (sin navegación destructiva)
+        if api_holder and api_holder.get("json"):
+            try:
+                api_json = api_holder["json"]
+                listas_api = []
+                for k in ["multas", "comparendos", "resoluciones"]:
+                    v = api_json.get(k)
+                    if isinstance(v, list):
+                        listas_api.extend(v)
+
+                for comp in comparendos_extraidos:
+                    c_num = str(comp.numero_comparendo or "").strip().upper()
+                    c_res = str(comp.numero_resolucion or "").strip().upper()
+                    for item in listas_api:
+                        if not isinstance(item, dict):
+                            continue
+                        item_num = str(item.get("numeroComparendo") or item.get("numeroResolucion") or item.get("numero") or item.get("idComparendo") or "").strip().upper()
+                        if (c_num and c_num in item_num) or (c_res and c_res in item_num) or (item_num and (item_num in c_num or item_num in c_res)):
+                            if not comp.direccion and item.get("direccion"):
+                                comp.direccion = str(item.get("direccion")).strip()
+                            if not comp.fuente_comparendo and item.get("fuente"):
+                                comp.fuente_comparendo = str(item.get("fuente")).strip()
+                            break
+            except Exception as e_api_enrich:
+                logger.warning(f"Aviso enriqueciendo comparendos con API interceptada: {e_api_enrich}")
 
         logger.info(f"Se extrajeron {len(comparendos_extraidos)} comparendos/multas reales en la tabla SIMIT para {criterio_clean}.")
         return comparendos_extraidos
@@ -434,9 +449,10 @@ class ClienteNavegadorSimit:
                 # ¿Aparecieron filas de comparendos en la tabla?
                 rows_found = await page.query_selector_all("mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row")
                 if len(rows_found) > 0:
+                    cant_filas_detectadas = len(rows_found)
                     render_ok = True
                     busqueda_exitosa = True
-                    logger.info(f"[Intento {intento}] ¡Tabla de comparendos renderizada a los {seg}s ({len(rows_found)} registros encontrados)!")
+                    logger.info(f"[Intento {intento}] ¡Tabla de comparendos renderizada a los {seg}s ({cant_filas_detectadas} registros encontrados)!")
                     break
 
                 # ¿SIMIT desplegó un mensaje oficial de paz y salvo o sin comparendos?
@@ -487,8 +503,21 @@ class ClienteNavegadorSimit:
         comparendos = await self._extraer_comparendos_de_tabla_actual(
             page,
             criterio_clean,
-            numero_comparendo_objetivo=numero_comparendo_objetivo
+            numero_comparendo_objetivo=numero_comparendo_objetivo,
+            api_holder=api_holder
         )
+
+        # Validación estricta de integridad de la extracción:
+        # Si la tabla visual renderizó N filas y se extrajeron menos de N, la extracción fue incompleta.
+        # En tal caso se reporta como no exitosa para bloquear categóricamente la conciliación errónea.
+        if not numero_comparendo_objetivo and cant_filas_detectadas > 0 and len(comparendos) < cant_filas_detectadas:
+            msg_incompleto = (
+                f"Extracción incompleta en SIMIT para {criterio_clean}: Se detectaron {cant_filas_detectadas} registros "
+                f"en la tabla pero solo se extrajeron {len(comparendos)}. Se deshabilita conciliación por protección de datos."
+            )
+            logger.error(f"[PROTECCIÓN DE INTEGRIDAD] {msg_incompleto}")
+            return False, comparendos, modal_detectado, msg_incompleto
+
         return True, comparendos, modal_detectado, None
 
     async def _consultar_criterio_en_pagina(
