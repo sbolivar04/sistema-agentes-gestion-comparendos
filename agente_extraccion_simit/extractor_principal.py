@@ -25,7 +25,8 @@ def ejecutar_extraccion(
     sin_interfaz: bool = False,
     id_lote: Optional[str] = None,
     origen: Optional[str] = None,
-    usuario: Optional[str] = "Sistema"
+    usuario: Optional[str] = "Sistema",
+    numero_comparendo_objetivo: Optional[str] = None
 ):
     """Inicializa la BD, ejecuta la extracción en SIMIT y persiste los resultados en Supabase."""
     print("\n" + "=" * 80)
@@ -45,7 +46,10 @@ def ejecutar_extraccion(
     cliente = ClienteSimit(sin_interfaz=sin_interfaz)
 
     # 3. Ejecutar extracción
-    if tipo_consulta == "NIT":
+    if numero_comparendo_objetivo:
+        print(f"\n[PASO 1] Consultando SIMIT en vivo para la Placa {criterio} (Comparendo/Resolución puntual: {numero_comparendo_objetivo})")
+        resultado = cliente.consultar_por_placa(criterio, numero_comparendo_objetivo=numero_comparendo_objetivo)
+    elif tipo_consulta == "NIT":
         print(f"\n[PASO 1] Consultando SIMIT en vivo para el NIT: {criterio}")
         resultado = cliente.consultar_por_nit(criterio)
     else:
@@ -59,7 +63,8 @@ def ejecutar_extraccion(
         tipo_consulta=tipo_consulta,
         id_lote=id_lote,
         origen=origen,
-        usuario=usuario
+        usuario=usuario,
+        numero_comparendo_objetivo=numero_comparendo_objetivo
     )
     return resultado
 
@@ -69,7 +74,8 @@ def guardar_resultado_extraccion(
     tipo_consulta: str = "NIT",
     id_lote: Optional[str] = None,
     origen: Optional[str] = None,
-    usuario: Optional[str] = "Sistema"
+    usuario: Optional[str] = "Sistema",
+    numero_comparendo_objetivo: Optional[str] = None
 ) -> tuple[int, int]:
     """Persiste los resultados de la consulta en Supabase, registra auditoría y presenta el reporte en consola."""
     usuario_final = (usuario or "Sistema").strip()
@@ -81,7 +87,10 @@ def guardar_resultado_extraccion(
         return 0, 0
 
     permitir_conciliacion = getattr(resultado, "permitir_conciliacion", True)
-    if not permitir_conciliacion:
+    if numero_comparendo_objetivo:
+        permitir_conciliacion = False
+
+    if not permitir_conciliacion and not numero_comparendo_objetivo:
         print(f"\n[PROTECCIÓN DE INTEGRIDAD] Se omitirá la conciliación para {criterio_final} porque la extracción presentó fallos en alguna variante. Los comparendos activos preexistentes se mantienen protegidos.")
 
     nuevos = 0
@@ -100,6 +109,20 @@ def guardar_resultado_extraccion(
                 )
         except Exception as e_guardar:
             print(f"[ERROR] Error al guardar comparendos para {criterio_final}: {e_guardar}")
+    elif numero_comparendo_objetivo and resultado.exitoso:
+        # SIMIT confirmó 0 registros para este comparendo objetivo -> Está descargado / pagado en SIMIT
+        try:
+            with obtener_sesion_bd() as sesion:
+                repo = RepositorioBaseDatos(sesion)
+                comp_descargado = repo.marcar_comparendo_como_descargado(
+                    placa=criterio_final,
+                    identificador=numero_comparendo_objetivo
+                )
+                if comp_descargado:
+                    actualizados += 1
+                    print(f"\n[SIMIT PAZ Y SALVO] El comparendo {numero_comparendo_objetivo} de la placa {criterio_final} ya no figura en SIMIT. Marcado como 'No activo'.")
+        except Exception as e_descargue:
+            print(f"[ERROR] Error al marcar comparendo como descargado en Supabase: {e_descargue}")
 
     # Registrar log de auditoría en Supabase con el estado real de la ejecución
     try:
@@ -171,14 +194,21 @@ def guardar_resultado_extraccion(
 
 def main():
     sin_interfaz = "--sin-interfaz" in sys.argv or "--headless" in sys.argv
-    args_limpios = [a for a in sys.argv[1:] if a not in ["--sin-interfaz", "--headless"]]
+    comparendo_arg = None
+    for a in sys.argv[1:]:
+        if a.startswith("--comparendo="):
+            comparendo_arg = a.split("=", 1)[1].strip()
+        elif a.startswith("--resolucion="):
+            comparendo_arg = a.split("=", 1)[1].strip()
+
+    args_limpios = [a for a in sys.argv[1:] if not a.startswith("--")]
 
     if len(args_limpios) > 0:
         param_limpio = re.sub(r'[^A-Z0-9]', '', args_limpios[0].upper())
         if param_limpio.isdigit():
-            ejecutar_extraccion(param_limpio, "NIT", sin_interfaz=sin_interfaz)
+            ejecutar_extraccion(param_limpio, "NIT", sin_interfaz=sin_interfaz, numero_comparendo_objetivo=comparendo_arg)
         else:
-            ejecutar_extraccion(param_limpio, "PLACA", sin_interfaz=sin_interfaz)
+            ejecutar_extraccion(param_limpio, "PLACA", sin_interfaz=sin_interfaz, numero_comparendo_objetivo=comparendo_arg)
         return
 
     print("\n" + "=" * 80)

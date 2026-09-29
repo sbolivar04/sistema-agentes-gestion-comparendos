@@ -35,6 +35,7 @@ class SolicitudExtraccion(BaseModel):
     tipo_consulta: Optional[str] = Field("NIT", description="NIT o Placa")
     origen: Optional[str] = Field(None, description="Origen de la ejecución: MANUAL_MASIVO, MANUAL_INDIVIDUAL, PROGRAMADO_MASIVO")
     usuario: Optional[str] = Field(None, description="Nombre o correo del usuario ejecutor que lanza la extracción")
+    numero_comparendo: Optional[str] = Field(None, description="Número de comparendo o resolución específico a sincronizar")
 
 _ultimo_dispatch_ts: float = 0.0
 _ultimo_criterio_solicitado: Optional[str] = None
@@ -46,7 +47,8 @@ def disparar_workflow_github(
     criterio: Optional[str] = None,
     tipo_consulta: str = "NIT",
     origen: Optional[str] = None,
-    usuario: Optional[str] = None
+    usuario: Optional[str] = None,
+    numero_comparendo: Optional[str] = None
 ) -> bool:
     """Dispara el workflow extraccion_simit.yml en GitHub Actions vía API REST con protección anti-duplicados y trazabilidad de usuario y origen."""
     global _ultimo_dispatch_ts, _ultimo_criterio_solicitado, _ultimo_tipo_solicitado
@@ -77,7 +79,8 @@ def disparar_workflow_github(
             "criterio": _ultimo_criterio_solicitado or "",
             "tipo_consulta": _ultimo_tipo_solicitado,
             "origen": origen_final,
-            "usuario": usuario_final
+            "usuario": usuario_final,
+            "numero_comparendo": str(numero_comparendo or "").strip()
         }
     }).encode("utf-8")
 
@@ -113,14 +116,18 @@ def lanzar_extraccion(solicitud: SolicitudExtraccion) -> Dict[str, Any]:
             criterio=solicitud.criterio,
             tipo_consulta=solicitud.tipo_consulta or "NIT",
             origen=origen_calculado,
-            usuario=usuario_calculado
+            usuario=usuario_calculado,
+            numero_comparendo=solicitud.numero_comparendo
         )
         if exito:
             if es_multiples:
                 cant = len([c for c in solicitud.criterio.split(",") if c.strip()])
                 criterio_txt = f" de {cant} entidades seleccionadas"
             elif solicitud.criterio and solicitud.criterio.strip():
-                criterio_txt = f" de {solicitud.criterio}"
+                if solicitud.numero_comparendo:
+                    criterio_txt = f" para el comparendo {solicitud.numero_comparendo} (Placa {solicitud.criterio})"
+                else:
+                    criterio_txt = f" de {solicitud.criterio}"
             else:
                 criterio_txt = " de toda la flota"
             return {
@@ -154,7 +161,8 @@ def lanzar_extraccion(solicitud: SolicitudExtraccion) -> Dict[str, Any]:
                     solicitud.tipo_consulta or "NIT",
                     sin_interfaz=True,
                     origen=origen_calculado,
-                    usuario=usuario_calculado
+                    usuario=usuario_calculado,
+                    numero_comparendo_objetivo=solicitud.numero_comparendo
                 )
             else:
                 from agente_extraccion_simit.extractor_lote import ejecutar_extraccion_lote

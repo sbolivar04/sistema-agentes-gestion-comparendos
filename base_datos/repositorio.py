@@ -174,6 +174,43 @@ class RepositorioBaseDatos:
         self.session.flush()
         return nuevos, actualizados
 
+    def marcar_comparendo_como_descargado(
+        self,
+        placa: str,
+        identificador: str
+    ) -> Optional[ComparendoORM]:
+        """
+        Marca un comparendo puntual como 'No activo' (descargado en SIMIT / Paz y Salvo)
+        tras confirmar que en la consulta oficial de SIMIT para la placa ya no figura activo.
+        """
+        id_limpio = str(identificador or "").strip()
+        placa_limpia = str(placa or "").strip().upper()
+        if not id_limpio or not placa_limpia:
+            return None
+
+        from sqlalchemy import or_
+        comparendo = self.session.scalar(
+            select(ComparendoORM)
+            .where(ComparendoORM.placa == placa_limpia)
+            .where(
+                or_(
+                    ComparendoORM.numero_comparendo == id_limpio,
+                    ComparendoORM.numero_resolucion == id_limpio
+                )
+            )
+        )
+
+        if comparendo:
+            comparendo.estado_simit = "No activo"
+            comparendo.fecha_descarga_simit = datetime.now()
+            comparendo.fecha_ultima_actualizacion = datetime.now()
+            self.session.flush()
+            logger.info(
+                f"[SIMIT PAZ Y SALVO] Comparendo puntual {comparendo.numero_comparendo} (Res: {comparendo.numero_resolucion}) "
+                f"de la placa {placa_limpia} marcado como 'No activo' (descargado de SIMIT)."
+            )
+        return comparendo
+
     def registrar_log_extraccion(
         self,
         criterio: str,

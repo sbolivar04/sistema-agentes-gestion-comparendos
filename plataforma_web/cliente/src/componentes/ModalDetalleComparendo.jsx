@@ -12,8 +12,12 @@ import {
   Check,
   DollarSign,
   FileSpreadsheet,
-  Info
+  Info,
+  RefreshCw,
+  CheckCircle2
 } from 'lucide-react'
+import { EtiquetaTooltip } from './EtiquetaTooltip'
+import { useFlota } from '../contexto/ContextoFlota'
 
 /**
  * Componente ModalDetalleComparendo (Diseño Ejecutivo 2 Columnas)
@@ -23,6 +27,53 @@ import {
 export function ModalDetalleComparendo({ comparendo, alCerrar }) {
   const [copiadoComparendo, setCopiadoComparendo] = useState(false)
   const [copiadoResolucion, setCopiadoResolucion] = useState(false)
+
+  // Sincronización puntual en vivo de este comparendo con el portal SIMIT (Opción 2)
+  const { sincronizarComparendoPuntual } = useFlota()
+  const [sincronizandoSimit, setSincronizandoSimit] = useState(false)
+  const [mensajeSincronizacion, setMensajeSincronizacion] = useState(null)
+
+  const manejarSincronizacionSimit = async () => {
+    if (sincronizandoSimit || !comparendo?.id) return
+    const idDisplay = comparendo.numero_comparendo || comparendo.numero_resolucion || ''
+    setSincronizandoSimit(true)
+    setMensajeSincronizacion({
+      tipo: 'info',
+      texto: `Consultando en vivo el comparendo ${idDisplay} (Placa ${comparendo.placa}) en SIMIT...`
+    })
+
+    try {
+      const res = await sincronizarComparendoPuntual(comparendo.id)
+      if (res?.exitoso) {
+        if (res.descargado) {
+          setMensajeSincronizacion({
+            tipo: 'exito',
+            texto: '¡Paz y Salvo Oficial! El comparendo ya no se encuentra pendiente en SIMIT y fue registrado como descargado.'
+          })
+        } else {
+          setMensajeSincronizacion({
+            tipo: 'info',
+            texto: res.mensaje || 'Información del comparendo actualizada en vivo desde el SIMIT.'
+          })
+        }
+      } else {
+        setMensajeSincronizacion({
+          tipo: 'error',
+          texto: res?.mensaje || 'No se pudo sincronizar el comparendo con SIMIT.'
+        })
+      }
+    } catch (err) {
+      setMensajeSincronizacion({
+        tipo: 'error',
+        texto: 'Error de comunicación al consultar el portal SIMIT.'
+      })
+    } finally {
+      setSincronizandoSimit(false)
+      setTimeout(() => {
+        setMensajeSincronizacion(null)
+      }, 8000)
+    }
+  }
 
   // Cerrar al presionar la tecla Escape
   useEffect(() => {
@@ -153,16 +204,53 @@ export function ModalDetalleComparendo({ comparendo, alCerrar }) {
             </div>
           </div>
 
-          <button
-            type="button"
-            className="boton-icono"
-            onClick={alCerrar}
-            aria-label="Cerrar modal"
-            style={{ width: '34px', height: '34px' }}
-          >
-            <X size={18} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <EtiquetaTooltip 
+              texto={sincronizandoSimit ? "Consultando y actualizando comparendo en el SIMIT..." : "Actualizar información de este comparendo directamente desde el SIMIT"} 
+              posicion="abajo"
+            >
+              <button
+                type="button"
+                className={`boton-sincronizar-modal ${sincronizandoSimit ? 'sincronizando' : ''}`}
+                onClick={manejarSincronizacionSimit}
+                disabled={sincronizandoSimit}
+              >
+                <RefreshCw size={13} className={sincronizandoSimit ? 'animar-rotacion' : ''} />
+                <span>{sincronizandoSimit ? 'Actualizando...' : 'Actualizar SIMIT'}</span>
+              </button>
+            </EtiquetaTooltip>
+
+            <button
+              type="button"
+              className="boton-icono"
+              onClick={alCerrar}
+              aria-label="Cerrar modal"
+              style={{ width: '34px', height: '34px' }}
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
+
+        {/* Banner de Notificación de Sincronización SIMIT */}
+        {mensajeSincronizacion && (
+          <div className={`alerta-sincronizacion-modal alerta-${mensajeSincronizacion.tipo}`} style={{ margin: '0.85rem 1.5rem 0' }}>
+            <div className="alerta-sincronizacion-icono">
+              {mensajeSincronizacion.tipo === 'info' && <RefreshCw size={15} className={sincronizandoSimit ? 'animar-rotacion' : ''} />}
+              {mensajeSincronizacion.tipo === 'exito' && <CheckCircle2 size={16} />}
+              {mensajeSincronizacion.tipo === 'error' && <AlertCircle size={16} />}
+            </div>
+            <span className="alerta-sincronizacion-texto">{mensajeSincronizacion.texto}</span>
+            <button 
+              type="button" 
+              className="alerta-sincronizacion-cerrar"
+              onClick={() => setMensajeSincronizacion(null)}
+              aria-label="Cerrar aviso"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
 
         {/* Cuerpo del Modal con Distribución Optimizada */}
         <div className="modal-detalle-cuerpo">

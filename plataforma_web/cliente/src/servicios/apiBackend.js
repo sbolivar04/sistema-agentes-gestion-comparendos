@@ -27,6 +27,27 @@ export const apiBackend = {
     return await res.json()
   },
 
+  async sincronizarComparendoPuntual(comparendoId, usuario = null) {
+    let usuarioFinal = usuario
+    if (!usuarioFinal) {
+      try {
+        const sesion = localStorage.getItem('usuario_fscr_sesion')
+        if (sesion) {
+          const u = JSON.parse(sesion)
+          usuarioFinal = u?.nombre || u?.email || 'Usuario FSCR'
+        }
+      } catch (e) {}
+    }
+    const params = new URLSearchParams()
+    if (usuarioFinal) params.append('usuario', usuarioFinal)
+    const qs = params.toString() ? `?${params.toString()}` : ''
+    const res = await fetch(`${API_BASE}/comparendos/${comparendoId}/sincronizar-simit${qs}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    return await res.json()
+  },
+
   async enviarMensajeChat(mensaje) {
     const res = await fetch(`${API_BASE}/chat`, {
       method: 'POST',

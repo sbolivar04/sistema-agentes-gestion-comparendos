@@ -19,10 +19,17 @@ class ClienteSimit:
         logger.info(f"Iniciando consulta masiva en vivo para NIT: {nit}")
         return self.cliente_navegador.consultar_en_vivo(nit, tipo_consulta="NIT")
 
-    def consultar_por_placa(self, placa: str) -> EsquemaResultadoConsulta:
-        """Consulta en tiempo real en SIMIT por la Placa del vehículo."""
-        logger.info(f"Iniciando consulta puntual en vivo para Placa: {placa}")
-        return self.cliente_navegador.consultar_en_vivo(placa, tipo_consulta="PLACA")
+    def consultar_por_placa(self, placa: str, numero_comparendo_objetivo: Optional[str] = None) -> EsquemaResultadoConsulta:
+        """Consulta en tiempo real en SIMIT por la Placa del vehículo o para un comparendo específico."""
+        if numero_comparendo_objetivo:
+            logger.info(f"Iniciando consulta dirigida en vivo para Placa {placa} (Comparendo/Resolución: {numero_comparendo_objetivo})")
+        else:
+            logger.info(f"Iniciando consulta puntual en vivo para Placa: {placa}")
+        return self.cliente_navegador.consultar_en_vivo(
+            placa,
+            tipo_consulta="PLACA",
+            numero_comparendo_objetivo=numero_comparendo_objetivo
+        )
 
     def consultar_lote(self, lista_consultas: list, callback_procesamiento=None) -> list:
         """

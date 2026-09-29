@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from datetime import datetime
@@ -8,6 +9,8 @@ from sqlalchemy.orm import joinedload
 from base_datos.conexion import obtener_sesion_bd
 from base_datos.modelos import ComparendoORM
 from plataforma_web.utilidades_exportacion import generar_excel_resumen
+
+logger = logging.getLogger(__name__)
 
 enrutador_comparendos = APIRouter(prefix="/api/comparendos", tags=["Comparendos"])
 
@@ -280,4 +283,118 @@ def exportar_comparendos_excel():
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al generar reporte Excel: {str(e)}")
+
+
+@enrutador_comparendos.post("/{id_comparendo}/sincronizar-simit")
+def sincronizar_comparendo_simit(
+    id_comparendo: int,
+    usuario: Optional[str] = Query(None, description="Usuario ejecutor que solicita la sincronización puntual")
+) -> Dict[str, Any]:
+    """
+    Sincroniza un comparendo específico directamente con el portal oficial SIMIT.
+    Consulta la placa del vehículo en SIMIT y actualiza ÚNICAMENTE este comparendo
+    (o lo marca como 'No activo' si SIMIT confirma que ya no existe deuda o comparendo pendiente).
+    Protege todos los demás comparendos del vehículo o de la empresa sin tocarlos.
+    """
+    try:
+        with obtener_sesion_bd() as sesion:
+            comp_db = sesion.get(ComparendoORM, id_comparendo)
+            if not comp_db:
+                raise HTTPException(status_code=404, detail="Comparendo no encontrado")
+            
+            placa = str(comp_db.placa or "").strip().upper()
+            num_comp = str(comp_db.numero_comparendo or "").strip()
+            num_res = str(comp_db.numero_resolucion or "").strip()
+            id_objetivo = num_comp or num_res
+
+        if not placa or not id_objetivo:
+            raise HTTPException(status_code=400, detail="El comparendo no cuenta con placa o número de comparendo válido para consultar en SIMIT.")
+
+        usuario_final = (usuario or "Usuario Web").strip()
+        origen_final = "MANUAL_INDIVIDUAL"
+
+        # 1. Disparar extracción dirigida en GitHub Actions (Arquitectura estándar para producción web en la nube)
+        from plataforma_web.rutas_api.extraccion import disparar_workflow_github
+        try:
+            exito_remoto = disparar_workflow_github(
+                criterio=placa,
+                tipo_consulta="PLACA",
+                origen=origen_final,
+                usuario=usuario_final,
+                numero_comparendo=id_objetivo
+            )
+            if exito_remoto:
+                with obtener_sesion_bd() as sesion:
+                    comp_actualizado = (
+                        sesion.execute(
+                            select(ComparendoORM)
+                            .options(joinedload(ComparendoORM.gestion_operativa))
+                            .where(ComparendoORM.id == id_comparendo)
+                        )
+                        .scalars()
+                        .first()
+                    )
+                    datos_serializados = serializar_comparendo(comp_actualizado) if comp_actualizado else {}
+                    estado_simit = comp_actualizado.estado_simit if comp_actualizado else "Activo"
+
+                return {
+                    "exitoso": True,
+                    "modo": "remoto",
+                    "mensaje": f"El agente inició la verificación del comparendo {id_objetivo} (Placa {placa}) en SIMIT mediante GitHub Actions. Los datos se actualizarán en breve.",
+                    "comparendo": datos_serializados,
+                    "estado_simit": estado_simit,
+                    "descargado": False
+                }
+        except Exception as err_remoto:
+            logger.warning(f"No fue posible disparar workflow en GitHub Actions ({err_remoto}). Intentando ejecución local...")
+
+        # 2. Fallback a ejecución local con Playwright si la API de GitHub no responde
+        from agente_extraccion_simit.extractor_principal import ejecutar_extraccion
+        resultado = ejecutar_extraccion(
+            criterio=placa,
+            tipo_consulta="PLACA",
+            sin_interfaz=True,
+            origen=origen_final,
+            usuario=usuario_final,
+            numero_comparendo_objetivo=id_objetivo
+        )
+
+        # 3. Consultar el estado actualizado en Supabase
+        with obtener_sesion_bd() as sesion:
+            comp_actualizado = (
+                sesion.execute(
+                    select(ComparendoORM)
+                    .options(joinedload(ComparendoORM.gestion_operativa))
+                    .where(ComparendoORM.id == id_comparendo)
+                )
+                .scalars()
+                .first()
+            )
+
+            if not comp_actualizado:
+                raise HTTPException(status_code=404, detail="No se pudo recuperar el comparendo tras la sincronización")
+
+            datos_serializados = serializar_comparendo(comp_actualizado)
+            es_descargado = comp_actualizado.estado_simit == "No activo"
+
+            if es_descargado:
+                mensaje_retorno = f"¡Paz y Salvo confirmado! El comparendo {id_objetivo} de la placa {placa} ya no figura en SIMIT y quedó marcado como 'No activo'."
+            elif resultado.exitoso and len(getattr(resultado, "comparendos", [])) > 0:
+                mensaje_retorno = f"Comparendo {id_objetivo} (Placa {placa}) verificado y actualizado con la información más reciente de SIMIT."
+            else:
+                mensaje_retorno = resultado.mensaje_error or "Sincronización finalizada."
+
+            return {
+                "exitoso": True,
+                "modo": "local",
+                "mensaje": mensaje_retorno,
+                "comparendo": datos_serializados,
+                "estado_simit": comp_actualizado.estado_simit,
+                "descargado": es_descargado
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al sincronizar comparendo con SIMIT: {str(e)}")
+
 

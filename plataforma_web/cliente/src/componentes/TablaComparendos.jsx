@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
-import { Search, Filter, ChevronLeft, ChevronRight, Eye, SlidersHorizontal, X, Percent, FolderKanban, CheckCircle2, Sparkles, Tag } from 'lucide-react'
+import { Search, Filter, ChevronLeft, ChevronRight, Eye, SlidersHorizontal, X, Percent, FolderKanban, Sparkles, Tag } from 'lucide-react'
 import { apiBackend } from '../servicios/apiBackend'
 import { useFlota } from '../contexto/ContextoFlota'
 import { ModalDetalleComparendo } from './ModalDetalleComparendo'
@@ -15,7 +15,13 @@ export function TablaComparendos({
   filtroEstadoExterno = null,
   versionFiltroEstadoExterno = 0
 }) {
-  const { comparendos: todosComparendos, cargandoComparendos: cargando, versionComparendos, cargarComparendos, cargarKPIs } = useFlota()
+  const { 
+    comparendos: todosComparendos, 
+    cargandoComparendos: cargando, 
+    versionComparendos, 
+    cargarComparendos, 
+    cargarKPIs 
+  } = useFlota()
   const [paginaActual, setPaginaActual] = useState(1)
 
   // Paginación por defecto en 5

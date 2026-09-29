@@ -335,6 +335,26 @@ export function ProveedorFlota({ children }) {
     }
   }
 
+  // Sincronización puntual de un comparendo específico con SIMIT
+  const sincronizarComparendoPuntual = async (comparendoId) => {
+    if (!comparendoId) return { exitoso: false, mensaje: 'ID de comparendo no suministrado' }
+
+    try {
+      const nombreUsuario = usuario?.nombre || usuario?.email || 'Administrador'
+      const res = await apiBackend.sincronizarComparendoPuntual(comparendoId, nombreUsuario)
+      if (res && res.exitoso && res.comparendo) {
+        setComparendos(prev => prev.map(item => item.id === comparendoId ? res.comparendo : item))
+        setVersionComparendos(v => v + 1)
+        cargarKPIs()
+        cargarAlertas()
+      }
+      return res
+    } catch (e) {
+      console.error('Error al sincronizar comparendo puntual con SIMIT:', e)
+      return { exitoso: false, mensaje: 'Error al comunicarse con el servidor para sincronizar el comparendo.' }
+    }
+  }
+
   const valor = {
     metricas,
     alertas,
@@ -347,6 +367,7 @@ export function ProveedorFlota({ children }) {
     setMensajeSync,
     limpiarMensajeSync,
     sincronizarSimit,
+    sincronizarComparendoPuntual,
     cargarTodo,
     cargarKPIs,
     cargarAlertas,

@@ -54,13 +54,20 @@ class ClienteNavegadorSimit:
         
         raise RuntimeError("No se pudo iniciar ningún navegador para la extracción.")
 
-    async def _extraer_comparendos_de_tabla_actual(self, page, criterio_clean: str) -> List[ComparendoSchema]:
+    async def _extraer_comparendos_de_tabla_actual(
+        self,
+        page,
+        criterio_clean: str,
+        numero_comparendo_objetivo: Optional[str] = None
+    ) -> List[ComparendoSchema]:
         """
         Extrae todos los comparendos y multas visibles en la tabla de resultados de SIMIT,
         ingresando a la vista 'Detalle' de cada uno para capturar dirección, hora, fuente y datos completos.
+        Si se especifica numero_comparendo_objetivo, solo ingresa a la fila coincidente.
         """
         comparendos_extraidos: List[ComparendoSchema] = []
-        logger.info(f"Analizando elementos visuales de la página en búsqueda de comparendos para {criterio_clean}...")
+        objetivo_limpio = re.sub(r'[^A-Z0-9]', '', str(numero_comparendo_objetivo).upper()) if numero_comparendo_objetivo else None
+        logger.info(f"Analizando elementos visuales de la página en búsqueda de comparendos para {criterio_clean} (Objetivo puntual: {objetivo_limpio or 'Todos'})...")
 
         results_table = await page.query_selector("mat-table, table.table, table, .mat-elevation-z8")
         if results_table:
@@ -90,6 +97,18 @@ class ClienteNavegadorSimit:
 
             comp_20_digitos = next((n for n in nums_filtrados if len(n) >= 15 and n.isdigit()), None)
             res_candidato = next((n for n in nums_filtrados if n != comp_20_digitos), None)
+
+            # Si es consulta dirigida a un comparendo específico, verificar coincidencia antes de abrir el Detalle
+            if objetivo_limpio:
+                coincide = False
+                for nf in nums_filtrados:
+                    if re.sub(r'[^A-Z0-9]', '', nf.upper()) == objetivo_limpio:
+                        coincide = True
+                        break
+                if not coincide and objetivo_limpio in re.sub(r'[^A-Z0-9]', '', col0_text.upper()):
+                    coincide = True
+                if not coincide:
+                    continue
 
             num_raw = comp_20_digitos or nums_filtrados[0]
             if num_raw in comp_set:
@@ -290,6 +309,10 @@ class ClienteNavegadorSimit:
                 es_fotodeteccion=es_foto
             ))
 
+            if objetivo_limpio:
+                logger.info(f"Comparendo objetivo {objetivo_limpio} extraído exitosamente de la tabla SIMIT.")
+                break
+
         logger.info(f"Se extrajeron {len(comparendos_extraidos)} comparendos/multas reales en la tabla SIMIT para {criterio_clean}.")
         return comparendos_extraidos
 
@@ -299,7 +322,8 @@ class ClienteNavegadorSimit:
         criterio_clean: str,
         tipo_preferencia: Optional[str] = None,
         api_holder: dict = None,
-        max_intentos: int = 3
+        max_intentos: int = 3,
+        numero_comparendo_objetivo: Optional[str] = None
     ) -> Tuple[bool, List[ComparendoSchema], bool, Optional[str]]:
         """
         Ejecuta un intento de búsqueda en la página actual para un criterio,
@@ -460,7 +484,11 @@ class ClienteNavegadorSimit:
         if es_vacio:
             return True, [], modal_detectado, None
 
-        comparendos = await self._extraer_comparendos_de_tabla_actual(page, criterio_clean)
+        comparendos = await self._extraer_comparendos_de_tabla_actual(
+            page,
+            criterio_clean,
+            numero_comparendo_objetivo=numero_comparendo_objetivo
+        )
         return True, comparendos, modal_detectado, None
 
     async def _consultar_criterio_en_pagina(
@@ -468,7 +496,8 @@ class ClienteNavegadorSimit:
         page,
         criterio: str,
         tipo_consulta: str,
-        api_holder: dict = None
+        api_holder: dict = None,
+        numero_comparendo_objetivo: Optional[str] = None
     ) -> ResultadoConsultaSchema:
         """
         Ejecuta la consulta de un NIT, Cédula o Placa en una página ya abierta de SIMIT.
@@ -535,7 +564,7 @@ class ClienteNavegadorSimit:
             if es_ambos:
                 logger.info(f"Modo AMBOS activo para {var_criterio}: Se consultarán comparendos bajo NIT y Cédula.")
                 exito_nit, comps_nit, modal_visto, err_nit = await self._ejecutar_busqueda_en_pagina(
-                    page, var_criterio, tipo_preferencia="NIT", api_holder=api_holder
+                    page, var_criterio, tipo_preferencia="NIT", api_holder=api_holder, numero_comparendo_objetivo=numero_comparendo_objetivo
                 )
                 if not exito_nit and err_nit and "Requiere configurar" in err_nit:
                     alerta_desambiguacion_requerida = True
@@ -554,7 +583,7 @@ class ClienteNavegadorSimit:
                     logger.info(f"Modal de múltiples identidades detectado para {var_criterio}. Ejecutando pasada secundaria como Cédula...")
                     await page.wait_for_timeout(1500)
                     exito_cc, comps_cc, _, err_cc = await self._ejecutar_busqueda_en_pagina(
-                        page, var_criterio, tipo_preferencia="Cédula", api_holder=api_holder
+                        page, var_criterio, tipo_preferencia="Cédula", api_holder=api_holder, numero_comparendo_objetivo=numero_comparendo_objetivo
                     )
                     if exito_cc:
                         variantes_exitosas.append(f"{var_criterio} (Cédula)")
@@ -566,7 +595,7 @@ class ClienteNavegadorSimit:
             else:
                 tipo_pref = tipo_consulta if tipo_consulta in ["NIT", "Cédula"] else ("NIT" if es_nit else pref_bd)
                 exito, comps_var, _, err_var = await self._ejecutar_busqueda_en_pagina(
-                    page, var_criterio, tipo_preferencia=tipo_pref, api_holder=api_holder
+                    page, var_criterio, tipo_preferencia=tipo_pref, api_holder=api_holder, numero_comparendo_objetivo=numero_comparendo_objetivo
                 )
                 if exito:
                     variantes_exitosas.append(var_criterio)
@@ -697,6 +726,29 @@ class ClienteNavegadorSimit:
                 f"(Total: ${total_nominal:,.2f} COP)."
             )
 
+        if numero_comparendo_objetivo:
+            if len(comparendos_enriquecidos) == 0:
+                logger.info(
+                    f"Comparendo objetivo '{numero_comparendo_objetivo}' no encontrado en SIMIT para {criterio_canonico}. "
+                    f"Se confirma que no registra deudas activas (Paz y Salvo / Descargado)."
+                )
+            else:
+                logger.info(
+                    f"Comparendo objetivo '{numero_comparendo_objetivo}' extraído exitosamente para {criterio_canonico}."
+                )
+            return ResultadoConsultaSchema(
+                criterio_busqueda=criterio_canonico,
+                tipo_consulta=tipo_enum,
+                exitoso=True,
+                total_comparendos=len(comparendos_enriquecidos),
+                total_valor_total=total_nominal,
+                total_valor_con_descuento_vigente=total_con_descuento,
+                comparendos=comparendos_enriquecidos,
+                mensaje_error=None,
+                permitir_conciliacion=False,
+                extraccion_completa=True
+            )
+
         return ResultadoConsultaSchema(
             criterio_busqueda=criterio_canonico,
             tipo_consulta=tipo_enum,
@@ -711,9 +763,18 @@ class ClienteNavegadorSimit:
         )
 
 
-    async def consultar_en_vivo_async(self, criterio: str, tipo_consulta: str) -> ResultadoConsultaSchema:
-        """Consulta individual: abre el navegador, consulta el criterio y cierra el navegador."""
-        resultados = await self.consultar_lote_en_vivo_async([{"criterio": criterio, "tipo_documento": tipo_consulta}])
+    async def consultar_en_vivo_async(
+        self,
+        criterio: str,
+        tipo_consulta: str,
+        numero_comparendo_objetivo: Optional[str] = None
+    ) -> ResultadoConsultaSchema:
+        """Consulta individual o puntual: abre el navegador, consulta el criterio y cierra el navegador."""
+        resultados = await self.consultar_lote_en_vivo_async([{
+            "criterio": criterio,
+            "tipo_documento": tipo_consulta,
+            "numero_comparendo_objetivo": numero_comparendo_objetivo
+        }])
         return resultados[0] if resultados else ResultadoConsultaSchema(
             criterio_busqueda=criterio,
             tipo_consulta=TipoConsulta.AMBOS if tipo_consulta == "AMBOS" else (TipoConsulta.NIT if (tipo_consulta == "NIT" or criterio.isdigit()) else TipoConsulta.PLACA),
@@ -784,6 +845,7 @@ class ClienteNavegadorSimit:
                     criterio = str(item.get("criterio") or item.get("nit") or item.get("placa") or "")
                     tipo_doc = str(item.get("tipo_documento") or item.get("tipo_consulta") or ("NIT" if criterio.isdigit() else "PLACA"))
                     empresa = item.get("empresa") or item.get("nombre_entidad") or criterio
+                    comp_objetivo = item.get("numero_comparendo_objetivo") or item.get("numero_comparendo")
 
                     # Cerrar cualquier pestaña emergente adicional antes de iniciar la entidad
                     for p in context.pages:
@@ -804,7 +866,9 @@ class ClienteNavegadorSimit:
                         logger.warning(f"Aviso al verificar estado del portal antes de {criterio}: {e_prev}")
 
                     logger.info(f"\n[{idx}/{len(lista_consultas)}] Consultando {empresa} ({tipo_doc}: {criterio}) en la misma sesión continua...")
-                    resultado = await self._consultar_criterio_en_pagina(page, criterio, tipo_doc, api_holder)
+                    resultado = await self._consultar_criterio_en_pagina(
+                        page, criterio, tipo_doc, api_holder, numero_comparendo_objetivo=comp_objetivo
+                    )
                     resultados.append(resultado)
 
                     if callback_procesamiento:
@@ -818,9 +882,20 @@ class ClienteNavegadorSimit:
                 logger.info("Sesión de extracción masiva completada. Cerrando navegador Chromium...")
                 await browser.close()
 
-    def consultar_en_vivo(self, criterio: str, tipo_consulta: str) -> ResultadoConsultaSchema:
-        """Wrapper síncrono para ejecutar la extracción individual con Playwright."""
-        return asyncio.run(self.consultar_en_vivo_async(criterio, tipo_consulta))
+    def consultar_en_vivo(
+        self,
+        criterio: str,
+        tipo_consulta: str,
+        numero_comparendo_objetivo: Optional[str] = None
+    ) -> ResultadoConsultaSchema:
+        """Wrapper síncrono para ejecutar la extracción individual o puntual con Playwright."""
+        return asyncio.run(
+            self.consultar_en_vivo_async(
+                criterio,
+                tipo_consulta,
+                numero_comparendo_objetivo=numero_comparendo_objetivo
+            )
+        )
 
     def consultar_lote_en_vivo(self, lista_consultas: list, callback_procesamiento=None) -> list:
         """Wrapper síncrono para ejecutar la extracción en lote en una sola sesión continua."""
