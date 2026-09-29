@@ -45,9 +45,9 @@ app.include_router(enrutador_gestiones_operativas)
 DIRECTORIO_RAIZ = Path(__file__).resolve().parent
 DIRECTORIO_DIST_CLIENTE = DIRECTORIO_RAIZ / "cliente" / "dist"
 
-@app.get("/salud", tags=["Salud del Sistema"])
+@app.api_route("/salud", methods=["GET", "HEAD"], tags=["Salud del Sistema"])
 def verificar_salud():
-    """Endpoint de verificación de estado y salud del servicio para Render / Balanceadores."""
+    """Endpoint de verificación de estado y salud del servicio para Render / Balanceadores / Cron-jobs."""
     return {"estado": "ok", "servicio": "FSCR Comparendos API"}
 
 # Servir aplicación de React compilada si existe
