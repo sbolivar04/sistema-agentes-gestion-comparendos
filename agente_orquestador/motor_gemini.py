@@ -46,13 +46,32 @@ class AgenteOrquestadorComparendos:
         config_gen = types.GenerateContentConfig(
             system_instruction=INSTRUCCIONES_SISTEMA_ORQUESTADOR,
             tools=self.herramientas,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),  # Elimina cobro de tokens de razonamiento
             temperature=0.0  # Temperatura 0.0 para máxima precisión y cero invención
         )
         self.chat = self.client.chats.create(
             model=self.modelo,
             config=config_gen
         )
-        logger.info(f"Sesión del Agente Orquestador inicializada con modelo: {self.modelo} (Temperatura: 0.0)")
+        logger.info(f"Sesión del Agente Orquestador inicializada con modelo: {self.modelo} (Temperatura: 0.0, Thinking: 0)")
+
+    def _podar_historial(self, max_mensajes: int = 6):
+        """
+        Mantiene una ventana deslizante de los últimos turnos en memoria.
+        Evita el efecto bola de nieve que disparaba el costo de tokens acumulados.
+        """
+        try:
+            curated = getattr(self.chat, "_curated_history", None)
+            comprehensive = getattr(self.chat, "_comprehensive_history", None)
+            if curated and len(curated) > max_mensajes:
+                podado = curated[-max_mensajes:]
+                while podado and podado[0].role != "user":
+                    podado = podado[1:]
+                self.chat._curated_history = podado
+                if comprehensive:
+                    self.chat._comprehensive_history = comprehensive[-len(podado):]
+        except Exception as e_poda:
+            logger.warning(f"Aviso al podar historial de conversación: {e_poda}")
 
     def procesar_mensaje(self, mensaje_usuario: str) -> EsquemaRespuestaAgente:
         """
@@ -66,6 +85,7 @@ class AgenteOrquestadorComparendos:
             try:
                 logger.info(f"Usuario: '{mensaje_usuario}'")
                 respuesta = self.chat.send_message(mensaje_usuario)
+                self._podar_historial(max_mensajes=6)
                 
                 texto = respuesta.text if respuesta.text else "No se generó texto de respuesta."
                 
