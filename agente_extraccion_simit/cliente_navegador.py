@@ -83,17 +83,25 @@ class ClienteNavegadorSimit:
                 continue
 
             col0_text = (await tds[0].inner_text()).strip()
-            num_comp_match = re.search(r'\b[A-Z0-9\-]{6,25}\b', col0_text)
-            if not num_comp_match:
+            nums_encontrados = re.findall(r'\b[A-Z0-9\-]{6,25}\b', col0_text)
+            nums_filtrados = [n for n in nums_encontrados if "6026800" not in n and "413588" not in n]
+            if not nums_filtrados:
                 continue
-            num_raw = num_comp_match.group(0)
 
-            if num_raw in comp_set or "6026800" in num_raw or "413588" in num_raw:
+            comp_20_digitos = next((n for n in nums_filtrados if len(n) >= 15 and n.isdigit()), None)
+            res_candidato = next((n for n in nums_filtrados if n != comp_20_digitos), None)
+
+            num_raw = comp_20_digitos or nums_filtrados[0]
+            if num_raw in comp_set:
                 continue
             comp_set.add(num_raw)
 
-            num_resolucion_val = num_raw
-            num_comp = num_raw
+            if comp_20_digitos:
+                num_comp = comp_20_digitos
+                num_resolucion_val = res_candidato or comp_20_digitos
+            else:
+                num_comp = num_raw
+                num_resolucion_val = num_raw
 
             valor_val = 0.0
             intereses_val = 0.0

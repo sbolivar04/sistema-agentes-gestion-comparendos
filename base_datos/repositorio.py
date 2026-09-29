@@ -30,7 +30,12 @@ class RepositorioBaseDatos:
 
         # 1. Conciliación de Comparendos (Solo si la extracción fue 100% íntegra y sin fallos parciales)
         if permitir_conciliacion:
-            numeros_extraidos = {c.numero_comparendo for c in comparendos_extraidos}
+            identificadores_extraidos = set()
+            for c in comparendos_extraidos:
+                if c.numero_comparendo:
+                    identificadores_extraidos.add(str(c.numero_comparendo).strip().upper())
+                if c.numero_resolucion:
+                    identificadores_extraidos.add(str(c.numero_resolucion).strip().upper())
             
             # Determinar criterios equivalentes para la conciliación (con y sin DV continuo)
             from agente_extraccion_simit.utilidades_documento import descomponer_nit
@@ -47,22 +52,49 @@ class RepositorioBaseDatos:
             ).scalars().all()
             
             for c_db in comparendos_db_activos:
-                if c_db.numero_comparendo not in numeros_extraidos:
+                num_comp_db = str(c_db.numero_comparendo or '').strip().upper()
+                num_res_db = str(c_db.numero_resolucion or '').strip().upper()
+                
+                # Se mantiene activo si su número de comparendo o su resolución están en la extracción
+                sigue_presente = (num_comp_db in identificadores_extraidos) or (bool(num_res_db) and num_res_db in identificadores_extraidos)
+                if not sigue_presente:
                     c_db.estado_simit = "No activo"
                     c_db.fecha_descarga_simit = datetime.now()
                     actualizados += 1
-                    logger.info(f"Conciliación: Comparendo {c_db.numero_comparendo} descargado de SIMIT -> Estado: No activo.")
+                    logger.info(f"Conciliación: Comparendo {c_db.numero_comparendo} (Res: {c_db.numero_resolucion}) descargado de SIMIT -> Estado: No activo.")
         else:
             logger.warning(
                 f"Conciliación omitida por seguridad para {criterio}: "
                 f"La extracción fue parcial o presentó fallas en alguna variante. Los comparendos activos se mantienen protegidos."
             )
 
-        # 2. Inserción o actualización
+        # 2. Inserción o actualización inteligente (Deduplicación multicriterio por placa y resolución)
+        from sqlalchemy import or_
         for comp in comparendos_extraidos:
+            comp_num = str(comp.numero_comparendo).strip() if comp.numero_comparendo else ""
+            comp_res = str(comp.numero_resolucion).strip() if comp.numero_resolucion else None
+            comp_placa = str(comp.placa).strip().upper() if comp.placa else ""
+
+            # 1. Búsqueda directa por número de comparendo
             existente = self.session.scalar(
-                select(ComparendoORM).where(ComparendoORM.numero_comparendo == comp.numero_comparendo)
+                select(ComparendoORM).where(ComparendoORM.numero_comparendo == comp_num)
             )
+
+            # 2. Si no coincide directamente por comparendo, buscar coincidencia por resolución para la misma placa
+            if not existente and comp_placa:
+                condiciones_cruce = []
+                if comp_res:
+                    condiciones_cruce.append(ComparendoORM.numero_resolucion == comp_res)
+                    condiciones_cruce.append(ComparendoORM.numero_comparendo == comp_res)
+                if comp_num:
+                    condiciones_cruce.append(ComparendoORM.numero_resolucion == comp_num)
+
+                if condiciones_cruce:
+                    existente = self.session.scalar(
+                        select(ComparendoORM)
+                        .where(ComparendoORM.placa == comp_placa)
+                        .where(or_(*condiciones_cruce))
+                    )
 
             if not existente:
                 nuevo_orm = ComparendoORM(
@@ -94,8 +126,16 @@ class RepositorioBaseDatos:
                 self.session.add(nuevo_orm)
                 nuevos += 1
             else:
-                if comp.numero_resolucion:
-                    existente.numero_resolucion = comp.numero_resolucion
+                # Regla de Identidad Canónica de Comparendo:
+                # Si el nuevo dato trae un número oficial canónico de 20 dígitos y el existente tenía una resolución provisional, actualizar el comparendo.
+                es_nuevo_canonico = len(comp_num) >= 15 and comp_num.isdigit()
+                es_existente_canonico = len(existente.numero_comparendo) >= 15 and existente.numero_comparendo.isdigit()
+                if es_nuevo_canonico and not es_existente_canonico:
+                    logger.info(f"Actualizando comparendo canónico para {existente.placa}: '{existente.numero_comparendo}' -> '{comp_num}'")
+                    existente.numero_comparendo = comp_num
+
+                if comp_res:
+                    existente.numero_resolucion = comp_res
                 if comp.criterio_busqueda:
                     existente.criterio_busqueda = comp.criterio_busqueda
                 existente.valor = comp.valor
@@ -105,7 +145,7 @@ class RepositorioBaseDatos:
                     existente.direccion = comp.direccion
                 if comp.fuente_comparendo:
                     existente.fuente_comparendo = comp.fuente_comparendo
-                if comp.fecha_infraccion:
+                if comp.fecha_infraccion and not es_existente_canonico:
                     existente.fecha_infraccion = comp.fecha_infraccion
                 if comp.fecha_notificacion:
                     existente.fecha_notificacion = comp.fecha_notificacion
