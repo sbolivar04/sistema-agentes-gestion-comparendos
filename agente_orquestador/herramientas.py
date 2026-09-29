@@ -339,23 +339,34 @@ def obtener_y_limpiar_evento_extraccion() -> Optional[Dict[str, Any]]:
     _ultimo_evento_extraccion = None
     return evento
 
-def solicitar_actualizacion_simit(criterio: Optional[str] = None, tipo_consulta: Optional[str] = None) -> Dict[str, Any]:
+def solicitar_actualizacion_simit(
+    criterio: Optional[str] = None,
+    tipo_consulta: Optional[str] = None,
+    numero_comparendo: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Consulta y actualiza en vivo los comparendos oficiales directamente
     desde el portal del SIMIT hacia la base de datos Supabase Cloud.
 
-    Soporta dos modalidades:
+    Soporta tres modalidades:
     1. ACTUALIZACIÓN MASIVA (Toda la flota / Todos los NITs):
        - Si criterio es None, vacío, o palabras como 'todos', 'flota', 'masivo', 'empresas':
          Inicia la actualización secuencial de todas las empresas y NITs registrados en el sistema.
-    2. ACTUALIZACIÓN PUNTUAL (Un vehículo o NIT específico):
-       - Si criterio es una Placa (ej. 'WEO146') o un NIT (ej. '900160091'):
-         Detecta automáticamente si es placa o NIT y lanza la consulta puntual en vivo.
+    2. ACTUALIZACIÓN COMPLETA DE UN VEHÍCULO (Todos los comparendos de una placa):
+       - Si criterio es una Placa (ej. 'WEO146') y numero_comparendo es None:
+         Consulta e investiga todos los comparendos de esa placa en el SIMIT.
+    3. ACTUALIZACIÓN DIRIGIDA DE UN COMPARENDO ESPECÍFICO (Opción 2):
+       - Si criterio es una Placa (ej. 'NYP139') Y numero_comparendo es el número
+         del comparendo o resolución objetivo (ej. '11001000000052680482'):
+         Consulta e investiga ÚNICAMENTE este comparendo en SIMIT, actualizando sus valores
+         o marcándolo como descargado / 'No activo' si ya está a paz y salvo, protegiendo
+         todos los demás comparendos del vehículo sin alterarlos.
     """
     import threading
     from plataforma_web.rutas_api.extraccion import disparar_workflow_github
     
     criterio_limpio = str(criterio).strip().upper() if criterio else None
+    num_comp_limpio = str(numero_comparendo).strip() if numero_comparendo else None
     
     # 1. Detectar si es masiva
     if not criterio_limpio or criterio_limpio in ["TODOS", "FLOTA", "TODAS", "MASIVO", "GLOBAL", "TODO", "EMPRESAS", "NONE"]:
@@ -382,15 +393,16 @@ def solicitar_actualizacion_simit(criterio: Optional[str] = None, tipo_consulta:
         if estado_actual.get("en_progreso"):
             registrar_evento_extraccion({
                 "iniciada": True,
-                "modo": "masivo" if es_masivo else "puntual",
+                "modo": "comparendo_especifico" if num_comp_limpio else ("masivo" if es_masivo else "puntual"),
                 "criterio": criterio_final,
                 "tipo_consulta": tipo_final,
+                "numero_comparendo": num_comp_limpio,
                 "tipo_ejecucion": "ya_en_ejecucion"
             })
             return {
                 "exitoso": True,
                 "ya_en_ejecucion": True,
-                "modo": "masivo" if es_masivo else "puntual",
+                "modo": "comparendo_especifico" if num_comp_limpio else ("masivo" if es_masivo else "puntual"),
                 "mensaje": f"Actualmente ya se está ejecutando una consulta en el SIMIT ({estado_actual.get('mensaje')}). Los datos se están sincronizando en este momento.",
                 "tipo_ejecucion": "ya_en_ejecucion"
             }
@@ -399,13 +411,18 @@ def solicitar_actualizacion_simit(criterio: Optional[str] = None, tipo_consulta:
 
     # 3. Intentar disparar vía GitHub Actions (en la nube)
     try:
-        exito_github = disparar_workflow_github(criterio=criterio_final, tipo_consulta=tipo_final)
+        exito_github = disparar_workflow_github(
+            criterio=criterio_final,
+            tipo_consulta=tipo_final,
+            numero_comparendo=num_comp_limpio
+        )
         if exito_github:
             registrar_evento_extraccion({
                 "iniciada": True,
-                "modo": "masivo" if es_masivo else "puntual",
+                "modo": "comparendo_especifico" if num_comp_limpio else ("masivo" if es_masivo else "puntual"),
                 "criterio": criterio_final,
                 "tipo_consulta": tipo_final,
+                "numero_comparendo": num_comp_limpio,
                 "tipo_ejecucion": "remoto_github_actions"
             })
             if es_masivo:
@@ -413,6 +430,16 @@ def solicitar_actualizacion_simit(criterio: Optional[str] = None, tipo_consulta:
                     "exitoso": True,
                     "modo": "masivo",
                     "mensaje": "Se inició con éxito la consulta y actualización masiva de toda la flota directamente en el portal del SIMIT. En pocos instantes todos los comparendos y estados estarán actualizados en Supabase.",
+                    "tipo_ejecucion": "remoto_github_actions"
+                }
+            elif num_comp_limpio:
+                return {
+                    "exitoso": True,
+                    "modo": "comparendo_especifico",
+                    "criterio": criterio_final,
+                    "tipo_consulta": tipo_final,
+                    "numero_comparendo": num_comp_limpio,
+                    "mensaje": f"Se inició con éxito la consulta en vivo exclusivamente para el comparendo {num_comp_limpio} de la placa {criterio_final} en el SIMIT. La información se está sincronizando en la base de datos.",
                     "tipo_ejecucion": "remoto_github_actions"
                 }
             else:
@@ -427,13 +454,14 @@ def solicitar_actualizacion_simit(criterio: Optional[str] = None, tipo_consulta:
     except Exception as e_gh:
         logger.warning(f"No fue posible disparar en GitHub Actions ({e_gh}), ejecutando en entorno local...")
 
-    # 3. Fallback: Ejecución local
+    # 4. Fallback: Ejecución local
     try:
         registrar_evento_extraccion({
             "iniciada": True,
-            "modo": "masivo" if es_masivo else "puntual",
+            "modo": "comparendo_especifico" if num_comp_limpio else ("masivo" if es_masivo else "puntual"),
             "criterio": criterio_final,
             "tipo_consulta": tipo_final,
+            "numero_comparendo": num_comp_limpio,
             "tipo_ejecucion": "local_background"
         })
         if es_masivo:
@@ -448,13 +476,20 @@ def solicitar_actualizacion_simit(criterio: Optional[str] = None, tipo_consulta:
             }
         else:
             from agente_extraccion_simit.extractor_principal import ejecutar_extraccion
-            resultado = ejecutar_extraccion(criterio=criterio_final, tipo_consulta=tipo_final, sin_interfaz=True, origen="MANUAL_INDIVIDUAL")
+            resultado = ejecutar_extraccion(
+                criterio=criterio_final,
+                tipo_consulta=tipo_final,
+                sin_interfaz=True,
+                origen="MANUAL_INDIVIDUAL",
+                numero_comparendo_objetivo=num_comp_limpio
+            )
             if resultado and resultado.exitoso:
                 return {
                     "exitoso": True,
-                    "modo": "puntual",
+                    "modo": "comparendo_especifico" if num_comp_limpio else "puntual",
                     "criterio": criterio_final,
                     "tipo_consulta": tipo_final,
+                    "numero_comparendo": num_comp_limpio,
                     "total_comparendos_obtenidos": resultado.total_comparendos,
                     "total_valor_sin_descuento": resultado.total_valor_total,
                     "total_valor_optimizado": resultado.total_valor_con_descuento_vigente,

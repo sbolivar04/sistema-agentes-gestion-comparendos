@@ -46,8 +46,7 @@ def procesar_mensaje_chat(solicitud: SolicitudMensajeChat) -> Dict[str, Any]:
 
 @enrutador_chat.post("/reiniciar")
 def reiniciar_chat() -> Dict[str, Any]:
-    """Reinicia el historial de conversación del agente."""
+    """Reinicia el historial de conversación del agente recreando la instancia limpia."""
     global _instancia_agente
-    if _instancia_agente is not None:
-        _instancia_agente.reiniciar_historial()
+    _instancia_agente = None
     return {"exitoso": True, "mensaje": "Historial de conversación reiniciado."}

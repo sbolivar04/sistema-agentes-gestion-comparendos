@@ -73,7 +73,7 @@ export function ModalDetalleComparendo({ comparendo: comparendoProp, alCerrar })
         if (res.descargado) {
           setMensajeSincronizacion({
             tipo: 'exito',
-            texto: '¡Paz y Salvo confirmado! El comparendo ya no figura en SIMIT y quedó marcado como \'No activo\'.'
+            texto: '¡Paz y Salvo confirmado! El comparendo ya no figura en SIMIT y quedó marcado como \'Pagado\'.'
           })
         } else {
           setMensajeSincronizacion({
@@ -236,8 +236,8 @@ export function ModalDetalleComparendo({ comparendo: comparendoProp, alCerrar })
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-            <EtiquetaTooltip 
-              texto={sincronizandoSimit ? "Consultando y actualizando comparendo en el SIMIT..." : "Actualizar información de este comparendo directamente desde el SIMIT"} 
+            <EtiquetaTooltip
+              texto={sincronizandoSimit ? "Consultando y actualizando comparendo en el SIMIT..." : "Actualizar información de este comparendo directamente desde el SIMIT"}
               posicion="abajo"
             >
               <button
@@ -272,8 +272,8 @@ export function ModalDetalleComparendo({ comparendo: comparendoProp, alCerrar })
               {mensajeSincronizacion.tipo === 'error' && <AlertCircle size={16} />}
             </div>
             <span className="alerta-sincronizacion-texto">{mensajeSincronizacion.texto}</span>
-            <button 
-              type="button" 
+            <button
+              type="button"
               className="alerta-sincronizacion-cerrar"
               onClick={() => setMensajeSincronizacion(null)}
               aria-label="Cerrar aviso"
@@ -388,17 +388,17 @@ export function ModalDetalleComparendo({ comparendo: comparendoProp, alCerrar })
                   </div>
                 </div>
 
-                {comparendo.fecha_resolucion && 
-                 comparendo.fecha_resolucion !== 'N/A' && 
-                 comparendo.fecha_resolucion !== 'null' && 
-                 comparendo.fecha_resolucion !== 'None' && (
-                  <div className="modal-dato-fila">
-                    <span className="etiqueta">Fecha Resolución</span>
-                    <span className="valor" style={{ fontWeight: 600 }}>
-                      {formatearFecha(comparendo.fecha_resolucion)}
-                    </span>
-                  </div>
-                )}
+                {comparendo.fecha_resolucion &&
+                  comparendo.fecha_resolucion !== 'N/A' &&
+                  comparendo.fecha_resolucion !== 'null' &&
+                  comparendo.fecha_resolucion !== 'None' && (
+                    <div className="modal-dato-fila">
+                      <span className="etiqueta">Fecha Resolución</span>
+                      <span className="valor" style={{ fontWeight: 600 }}>
+                        {formatearFecha(comparendo.fecha_resolucion)}
+                      </span>
+                    </div>
+                  )}
               </div>
             </div>
 
@@ -437,9 +437,9 @@ export function ModalDetalleComparendo({ comparendo: comparendoProp, alCerrar })
                     </span>
                     <span style={{ fontSize: '0.72rem', color: comparendo.ahorro_disponible > 0 ? '#059669' : 'var(--texto-secundario)' }}>
                       {esPagado
-                        ? (comparendo.ahorro_disponible > 0 
-                            ? `Beneficio aplicado: ${comparendo.etiqueta_descuento?.replace('Vigente', '').trim()}`
-                            : 'Paz y Salvo SIMIT')
+                        ? (comparendo.ahorro_disponible > 0
+                          ? `Beneficio aplicado: ${comparendo.etiqueta_descuento?.replace('Vigente', '').trim()}`
+                          : 'Paz y Salvo SIMIT')
                         : (comparendo.ahorro_disponible > 0 ? `Beneficio: ${comparendo.etiqueta_descuento}` : 'Tarifa Plena (Sin descuento)')}
                     </span>
                   </div>
