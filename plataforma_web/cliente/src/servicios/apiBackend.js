@@ -27,6 +27,11 @@ export const apiBackend = {
     return await res.json()
   },
 
+  async obtenerComparendoPorId(comparendoId) {
+    const res = await fetch(`${API_BASE}/comparendos/${comparendoId}`)
+    return await res.json()
+  },
+
   async sincronizarComparendoPuntual(comparendoId, usuario = null) {
     let usuarioFinal = usuario
     if (!usuarioFinal) {

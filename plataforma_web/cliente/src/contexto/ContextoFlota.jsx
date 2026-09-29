@@ -336,19 +336,84 @@ export function ProveedorFlota({ children }) {
   }
 
   // Sincronización puntual de un comparendo específico con SIMIT
-  const sincronizarComparendoPuntual = async (comparendoId) => {
+  const sincronizarComparendoPuntual = async (comparendoId, alActualizarProgreso = null) => {
     if (!comparendoId) return { exitoso: false, mensaje: 'ID de comparendo no suministrado' }
 
     try {
       const nombreUsuario = usuario?.nombre || usuario?.email || 'Administrador'
       const res = await apiBackend.sincronizarComparendoPuntual(comparendoId, nombreUsuario)
-      if (res && res.exitoso && res.comparendo) {
-        setComparendos(prev => prev.map(item => item.id === comparendoId ? res.comparendo : item))
-        setVersionComparendos(v => v + 1)
-        cargarKPIs()
-        cargarAlertas()
+      if (!res?.exitoso) {
+        return res
       }
-      return res
+
+      // Si se ejecutó en modo local sincrónico, ya trae el resultado final
+      if (res.modo === 'local') {
+        if (res.comparendo) {
+          setComparendos(prev => prev.map(item => item.id === comparendoId ? res.comparendo : item))
+          setVersionComparendos(v => v + 1)
+          cargarKPIs()
+          cargarAlertas()
+        }
+        return res
+      }
+
+      // Si se despachó a ejecución remota en la nube, monitorear hasta su finalización real
+      const resultadoFinal = await new Promise((resolve) => {
+        let intentos = 0
+        const maxIntentos = 60 // 60 * 2.5s = 150 segundos máximo
+        const intervalo = setInterval(async () => {
+          intentos++
+          try {
+            const estado = await apiBackend.obtenerEstadoExtraccion()
+
+            if (estado?.mensaje && typeof alActualizarProgreso === 'function') {
+              alActualizarProgreso(estado.mensaje)
+            }
+
+            if (!estado?.en_progreso || intentos >= maxIntentos) {
+              clearInterval(intervalo)
+
+              if (estado?.conclusion === 'success' || estado?.estado === 'completado') {
+                // Obtener datos frescos del comparendo desde Supabase
+                const resComp = await apiBackend.obtenerComparendoPorId(comparendoId)
+                if (resComp?.exitoso && resComp.comparendo) {
+                  const compActual = resComp.comparendo
+                  setComparendos(prev => prev.map(item => item.id === comparendoId ? compActual : item))
+                  setVersionComparendos(v => v + 1)
+                  cargarKPIs()
+                  cargarAlertas()
+                  const esDescargado = compActual.estado_simit === 'No activo'
+                  resolve({
+                    exitoso: true,
+                    descargado: esDescargado,
+                    comparendo: compActual,
+                    estado_simit: compActual.estado_simit,
+                    mensaje: esDescargado
+                      ? "¡Paz y Salvo confirmado! El comparendo ya no figura en SIMIT y quedó marcado como 'No activo'."
+                      : "¡Comparendo verificado y actualizado con la información más reciente de SIMIT!"
+                  })
+                  return
+                }
+                cargarTodo(true)
+                resolve({
+                  exitoso: true,
+                  descargado: false,
+                  mensaje: "¡Comparendo verificado y actualizado con la información más reciente de SIMIT!"
+                })
+              } else {
+                resolve({
+                  exitoso: false,
+                  mensaje: "No fue posible verificar el comparendo en SIMIT en este momento. Intente nuevamente en unos minutos."
+                })
+              }
+            }
+          } catch (errPoll) {
+            console.error('Error durante el sondeo del comparendo:', errPoll)
+          }
+        }, 2500)
+      })
+
+      return resultadoFinal
     } catch (e) {
       console.error('Error al sincronizar comparendo puntual con SIMIT:', e)
       return { exitoso: false, mensaje: 'Error al comunicarse con el servidor para sincronizar el comparendo.' }

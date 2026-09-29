@@ -285,6 +285,34 @@ def exportar_comparendos_excel():
         raise HTTPException(status_code=500, detail=f"Error al generar reporte Excel: {str(e)}")
 
 
+@enrutador_comparendos.get("/{id_comparendo}")
+def obtener_comparendo_por_id(id_comparendo: int) -> Dict[str, Any]:
+    """
+    Retorna el detalle completo y actualizado de un comparendo específico.
+    """
+    try:
+        with obtener_sesion_bd() as sesion:
+            comp = (
+                sesion.execute(
+                    select(ComparendoORM)
+                    .options(joinedload(ComparendoORM.gestion_operativa))
+                    .where(ComparendoORM.id == id_comparendo)
+                )
+                .scalars()
+                .first()
+            )
+            if not comp:
+                raise HTTPException(status_code=404, detail="Comparendo no encontrado")
+            return {
+                "exitoso": True,
+                "comparendo": serializar_comparendo(comp)
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener comparendo: {str(e)}")
+
+
 @enrutador_comparendos.post("/{id_comparendo}/sincronizar-simit")
 def sincronizar_comparendo_simit(
     id_comparendo: int,
@@ -313,7 +341,7 @@ def sincronizar_comparendo_simit(
         usuario_final = (usuario or "Usuario Web").strip()
         origen_final = "MANUAL_INDIVIDUAL"
 
-        # 1. Disparar extracción dirigida en GitHub Actions (Arquitectura estándar para producción web en la nube)
+        # 1. Disparar extracción dirigida en la nube
         from plataforma_web.rutas_api.extraccion import disparar_workflow_github
         try:
             exito_remoto = disparar_workflow_github(
@@ -340,13 +368,13 @@ def sincronizar_comparendo_simit(
                 return {
                     "exitoso": True,
                     "modo": "remoto",
-                    "mensaje": f"El agente inició la verificación del comparendo {id_objetivo} (Placa {placa}) en SIMIT mediante GitHub Actions. Los datos se actualizarán en breve.",
+                    "mensaje": f"El agente está verificando el comparendo {id_objetivo} (Placa {placa}) en SIMIT en tiempo real. Por favor espere unos segundos...",
                     "comparendo": datos_serializados,
                     "estado_simit": estado_simit,
                     "descargado": False
                 }
         except Exception as err_remoto:
-            logger.warning(f"No fue posible disparar workflow en GitHub Actions ({err_remoto}). Intentando ejecución local...")
+            logger.warning(f"No fue posible disparar proceso remoto ({err_remoto}). Intentando ejecución local...")
 
         # 2. Fallback a ejecución local con Playwright si la API de GitHub no responde
         from agente_extraccion_simit.extractor_principal import ejecutar_extraccion

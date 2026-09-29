@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   X,
   MapPin,
@@ -24,11 +24,23 @@ import { useFlota } from '../contexto/ContextoFlota'
  * Distribución optimizada para aprovechar el espacio horizontal, garantizando que
  * los números SIMIT de 20 dígitos se muestren de forma continua en una sola línea.
  */
-export function ModalDetalleComparendo({ comparendo, alCerrar }) {
+export function ModalDetalleComparendo({ comparendo: comparendoProp, alCerrar }) {
+  const [comparendo, setComparendo] = useState(comparendoProp)
+  const montadoRef = useRef(true)
+
+  useEffect(() => {
+    montadoRef.current = true
+    return () => { montadoRef.current = false }
+  }, [])
+
+  useEffect(() => {
+    setComparendo(comparendoProp)
+  }, [comparendoProp])
+
   const [copiadoComparendo, setCopiadoComparendo] = useState(false)
   const [copiadoResolucion, setCopiadoResolucion] = useState(false)
 
-  // Sincronización puntual en vivo de este comparendo con el portal SIMIT (Opción 2)
+  // Sincronización puntual en vivo de este comparendo con el portal SIMIT
   const { sincronizarComparendoPuntual } = useFlota()
   const [sincronizandoSimit, setSincronizandoSimit] = useState(false)
   const [mensajeSincronizacion, setMensajeSincronizacion] = useState(null)
@@ -39,39 +51,58 @@ export function ModalDetalleComparendo({ comparendo, alCerrar }) {
     setSincronizandoSimit(true)
     setMensajeSincronizacion({
       tipo: 'info',
-      texto: `Consultando en vivo el comparendo ${idDisplay} (Placa ${comparendo.placa}) en SIMIT...`
+      texto: `El agente está verificando el comparendo ${idDisplay} (Placa ${comparendo.placa}) en SIMIT en tiempo real. Por favor espere unos segundos...`
     })
 
     try {
-      const res = await sincronizarComparendoPuntual(comparendo.id)
+      const res = await sincronizarComparendoPuntual(comparendo.id, (textoProgreso) => {
+        if (montadoRef.current) {
+          setMensajeSincronizacion({
+            tipo: 'info',
+            texto: textoProgreso
+          })
+        }
+      })
+
+      if (!montadoRef.current) return
+
       if (res?.exitoso) {
+        if (res.comparendo) {
+          setComparendo(res.comparendo)
+        }
         if (res.descargado) {
           setMensajeSincronizacion({
             tipo: 'exito',
-            texto: '¡Paz y Salvo Oficial! El comparendo ya no se encuentra pendiente en SIMIT y fue registrado como descargado.'
+            texto: '¡Paz y Salvo confirmado! El comparendo ya no figura en SIMIT y quedó marcado como \'No activo\'.'
           })
         } else {
           setMensajeSincronizacion({
-            tipo: 'info',
-            texto: res.mensaje || 'Información del comparendo actualizada en vivo desde el SIMIT.'
+            tipo: 'exito',
+            texto: res.mensaje || '¡Comparendo verificado y actualizado con la información más reciente de SIMIT!'
           })
         }
       } else {
         setMensajeSincronizacion({
           tipo: 'error',
-          texto: res?.mensaje || 'No se pudo sincronizar el comparendo con SIMIT.'
+          texto: res?.mensaje || 'No fue posible verificar el comparendo en SIMIT en este momento. Intente nuevamente en unos minutos.'
         })
       }
     } catch (err) {
-      setMensajeSincronizacion({
-        tipo: 'error',
-        texto: 'Error de comunicación al consultar el portal SIMIT.'
-      })
+      if (montadoRef.current) {
+        setMensajeSincronizacion({
+          tipo: 'error',
+          texto: 'Error de comunicación al consultar el portal SIMIT.'
+        })
+      }
     } finally {
-      setSincronizandoSimit(false)
-      setTimeout(() => {
-        setMensajeSincronizacion(null)
-      }, 8000)
+      if (montadoRef.current) {
+        setSincronizandoSimit(false)
+        setTimeout(() => {
+          if (montadoRef.current) {
+            setMensajeSincronizacion(null)
+          }
+        }, 12000)
+      }
     }
   }
 

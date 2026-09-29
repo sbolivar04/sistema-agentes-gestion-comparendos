@@ -219,6 +219,20 @@ def consultar_estado_extraccion() -> Dict[str, Any]:
             ultimo_run = runs[0]
             status = ultimo_run.get("status") # 'queued', 'in_progress', 'completed'
             conclusion = ultimo_run.get("conclusion") # 'success', 'failure', etc.
+            
+            # Protección contra retraso de GitHub en reflejar la nueva ejecución encolada:
+            # Si se despachó hace menos de 18s y el run más reciente tiene fecha anterior al despacho,
+            # significa que GitHub todavía está aprovisionando el nuevo run y se debe reportar en cola.
+            created_at_str = ultimo_run.get("created_at")
+            if created_at_str and (ahora - _ultimo_dispatch_ts) < 18:
+                try:
+                    run_ts = datetime.fromisoformat(created_at_str.replace("Z", "+00:00")).timestamp()
+                    if run_ts < (_ultimo_dispatch_ts - 2):
+                        status = "queued"
+                        conclusion = None
+                except Exception:
+                    pass
+
             en_progreso = status in ("queued", "in_progress")
 
             # Nombre de la entidad consultada si fue puntual
