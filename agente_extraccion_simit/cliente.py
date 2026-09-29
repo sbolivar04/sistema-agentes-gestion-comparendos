@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 from agente_extraccion_simit.modelos import EsquemaResultadoConsulta, TipoConsulta
 from agente_extraccion_simit.cliente_navegador import ClienteNavegadorSimit
 
