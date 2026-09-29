@@ -58,8 +58,7 @@ class ClienteNavegadorSimit:
         self,
         page,
         criterio_clean: str,
-        numero_comparendo_objetivo: Optional[str] = None,
-        api_holder: Optional[dict] = None
+        numero_comparendo_objetivo: Optional[str] = None
     ) -> List[ComparendoSchema]:
         """
         Extrae todos los comparendos y multas visibles en la tabla de resultados de SIMIT,
@@ -81,7 +80,13 @@ class ClienteNavegadorSimit:
         comp_set = set()
 
         for idx in range(len(rows)):
-            rows_current = await page.query_selector_all("table tbody tr, mat-table mat-row, tr.mat-row, .mat-row, div[role='row']")
+            rows_current = []
+            for _ in range(8):
+                rows_current = await page.query_selector_all("mat-table mat-row, table tbody tr, tr.mat-row, .mat-row, div[role='row']")
+                if len(rows_current) > idx:
+                    break
+                await page.wait_for_timeout(400)
+
             if idx >= len(rows_current):
                 break
             row = rows_current[idx]
@@ -174,20 +179,16 @@ class ClienteNavegadorSimit:
             direccion_val = None
             fuente_val = None
 
-            # Buscar enlace del comparendo para ingresar a la vista 'Detalle' solo si es consulta dirigida puntual
-            link_elem = None
-            if objetivo_limpio:
-                link_elem = await tds[0].query_selector("a, button, [role='link']")
-                if not link_elem:
-                    link_elem = await row.query_selector("a, button, [role='link']")
-                if not link_elem:
-                    link_elem = await page.query_selector(f"a:has-text('{num_raw}'), button:has-text('{num_raw}')")
+            # Buscar enlace del comparendo para ingresar a la vista 'Detalle'
+            link_elem = await tds[0].query_selector("a, button, [role='link']")
+            if not link_elem:
+                link_elem = await row.query_selector("a, button, [role='link']")
+            if not link_elem:
+                link_elem = await page.query_selector(f"a:has-text('{num_raw}'), button:has-text('{num_raw}')")
 
-            # Navegar a la vista 'Detalle' ÚNICAMENTE en consultas puntuales de un comparendo específico.
-            # En consultas completas de placa o masivas, se extrae directamente de la tabla para proteger el DOM de Angular.
-            if objetivo_limpio and link_elem:
+            if link_elem:
                 try:
-                    logger.info(f"Navegando a la vista detallada del comparendo objetivo (Resolución {num_resolucion_val})...")
+                    logger.info(f"Navegando a la vista detallada del comparendo [{idx+1}/{len(rows)}] (Resolución {num_resolucion_val})...")
                     await link_elem.click()
                     await page.wait_for_timeout(3000)
 
@@ -245,13 +246,14 @@ class ClienteNavegadorSimit:
                             parsed_f = parse_datetime(full_dt_str)
                             if parsed_f:
                                 fecha_val = parsed_f
-                            logger.info(f"Vista Detalle extraída -> Res: {num_resolucion_val}, Comparendo: {num_comp}, Fecha: {fecha_str_det}, Hora: {hora_str_det}, Dirección: {direccion_val}")
+                            logger.info(f"Vista Detalle extraída [{idx+1}/{len(rows)}] -> Res: {num_resolucion_val}, Comparendo: {num_comp}, Fecha: {fecha_str_det}, Hora: {hora_str_det}, Dirección: {direccion_val}")
 
                         if detalle_data.get("fecha_notificacion"):
                             parsed_f_notif = parse_datetime(detalle_data["fecha_notificacion"])
                             if parsed_f_notif:
                                 fecha_notif = parsed_f_notif
 
+                    # Cerrar cualquier pestaña emergente no deseada abierta por enlaces con target="_blank"
                     for p in page.context.pages:
                         if p != page:
                             try:
@@ -259,15 +261,72 @@ class ClienteNavegadorSimit:
                             except Exception:
                                 pass
 
-                    volver_btn = await page.query_selector("button:has-text('Volver'), .btn-volver, a:has-text('Volver')")
-                    if volver_btn and await volver_btn.is_visible():
-                        await volver_btn.click(force=True)
-                        await page.wait_for_timeout(1500)
-                    else:
+                    # RETORNO A LA TABLA:
+                    # 1. Buscar botón de retorno con selectores ampliados (Regresar / Volver / Flecha atrás)
+                    selector_volver = (
+                        "button:has-text('Regresar'), button:has-text('REGRESAR'), "
+                        "button:has-text('Volver'), button:has-text('VOLVER'), "
+                        "button:has-text('Atrás'), .btn-regresar, .btn-volver, "
+                        "a:has-text('Regresar'), a:has-text('Volver'), "
+                        "button:has(mat-icon:has-text('arrow_back')), button:has(mat-icon), "
+                        "button:has(i[class*='arrow']), button:has(i[class*='back']), "
+                        "[aria-label*='regresar' i], [aria-label*='volver' i]"
+                    )
+
+                    volver_clicado = False
+                    for _ in range(5):
+                        volver_btn = await page.query_selector(selector_volver)
+                        if volver_btn and await volver_btn.is_visible():
+                            await volver_btn.click(force=True)
+                            volver_clicado = True
+                            await page.wait_for_timeout(1500)
+                            break
+                        await page.wait_for_timeout(300)
+
+                    if not volver_clicado:
                         await page.go_back()
                         await page.wait_for_timeout(1500)
+
+                    # 2. Verificar si la tabla de resultados retornó a pantalla
+                    tabla_visible = False
+                    for _ in range(5):
+                        tabla_check = await page.query_selector("mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row")
+                        if tabla_check and await tabla_check.is_visible():
+                            tabla_visible = True
+                            break
+                        await page.wait_for_timeout(400)
+
+                    # 3. AUTO-RECUPERACIÓN DE LA TABLA: Si no está visible, reconsultar en el buscador superior para continuar con las demás filas
+                    if not tabla_visible and idx + 1 < len(rows):
+                        logger.info(f"Restaurando tabla de resultados para {criterio_clean} tras detalle [{idx+1}/{len(rows)}]...")
+                        input_box = await page.query_selector("input#txtBusqueda, input[name='txtBusqueda']")
+                        if input_box:
+                            await input_box.fill("")
+                            await input_box.fill(criterio_clean)
+                            await page.dispatch_event("input#txtBusqueda", "input")
+                            await page.dispatch_event("input#txtBusqueda", "change")
+                            btn_cons = await page.query_selector("button#consultar, button:has-text('Consultar')")
+                            if btn_cons and await btn_cons.is_visible():
+                                await btn_cons.click(force=True)
+                            else:
+                                await page.press("input#txtBusqueda", "Enter")
+                            
+                            for _ in range(15):
+                                await page.wait_for_timeout(600)
+                                tabla_rec = await page.query_selector("mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row")
+                                if tabla_rec and await tabla_rec.is_visible():
+                                    logger.info("¡Tabla de resultados recuperada exitosamente para procesar el siguiente comparendo!")
+                                    await page.wait_for_timeout(500)
+                                    break
                 except Exception as ex_detail:
                     logger.warning(f"Aviso al acceder a la vista detallada de {num_resolucion_val}: {ex_detail}")
+                    # En caso de error en detalle, asegurar que no queden pestañas secundarias
+                    for p in page.context.pages:
+                        if p != page:
+                            try:
+                                await p.close()
+                            except Exception:
+                                pass
 
             # Reglas legales:
             # 1. Comparendo físico (en vía con agente): la notificación se realiza en el acto de la infracción
@@ -302,32 +361,6 @@ class ClienteNavegadorSimit:
                 logger.info(f"Comparendo objetivo {objetivo_limpio} extraído exitosamente de la tabla SIMIT.")
                 break
 
-        # Enriquecimiento en memoria con datos de la API interceptada de SIMIT (sin navegación destructiva)
-        if api_holder and api_holder.get("json"):
-            try:
-                api_json = api_holder["json"]
-                listas_api = []
-                for k in ["multas", "comparendos", "resoluciones"]:
-                    v = api_json.get(k)
-                    if isinstance(v, list):
-                        listas_api.extend(v)
-
-                for comp in comparendos_extraidos:
-                    c_num = str(comp.numero_comparendo or "").strip().upper()
-                    c_res = str(comp.numero_resolucion or "").strip().upper()
-                    for item in listas_api:
-                        if not isinstance(item, dict):
-                            continue
-                        item_num = str(item.get("numeroComparendo") or item.get("numeroResolucion") or item.get("numero") or item.get("idComparendo") or "").strip().upper()
-                        if (c_num and c_num in item_num) or (c_res and c_res in item_num) or (item_num and (item_num in c_num or item_num in c_res)):
-                            if not comp.direccion and item.get("direccion"):
-                                comp.direccion = str(item.get("direccion")).strip()
-                            if not comp.fuente_comparendo and item.get("fuente"):
-                                comp.fuente_comparendo = str(item.get("fuente")).strip()
-                            break
-            except Exception as e_api_enrich:
-                logger.warning(f"Aviso enriqueciendo comparendos con API interceptada: {e_api_enrich}")
-
         logger.info(f"Se extrajeron {len(comparendos_extraidos)} comparendos/multas reales en la tabla SIMIT para {criterio_clean}.")
         return comparendos_extraidos
 
@@ -348,6 +381,7 @@ class ClienteNavegadorSimit:
         input_selector = "input#txtBusqueda, input[name='txtBusqueda'], input[placeholder*='documento'], input[placeholder*='Placa']"
         busqueda_exitosa = False
         modal_detectado = False
+        cant_filas_detectadas = 0
 
         for intento in range(1, max_intentos + 1):
             logger.info(f"[Intento {intento}/{max_intentos}] Ingresando criterio '{criterio_clean}' (Preferencia: {tipo_preferencia or 'Auto'}) en el buscador SIMIT...")
@@ -503,8 +537,7 @@ class ClienteNavegadorSimit:
         comparendos = await self._extraer_comparendos_de_tabla_actual(
             page,
             criterio_clean,
-            numero_comparendo_objetivo=numero_comparendo_objetivo,
-            api_holder=api_holder
+            numero_comparendo_objetivo=numero_comparendo_objetivo
         )
 
         # Validación estricta de integridad de la extracción:
