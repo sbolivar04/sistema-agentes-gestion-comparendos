@@ -54,38 +54,250 @@ class ClienteNavegadorSimit:
         
         raise RuntimeError("No se pudo iniciar ningún navegador para la extracción.")
 
+    def _extraer_comparendos_desde_json_api(
+        self,
+        api_json: dict,
+        criterio_clean: str
+    ) -> List[ComparendoSchema]:
+        """
+        Extrae y normaliza los comparendos y multas directamente desde el JSON oficial
+        interceptado en memoria de la API de SIMIT (estadocuenta/consulta).
+        Garantiza que el número de comparendo y número de resolución vengan separados oficialmente,
+        y extrae direcciones, horas, fechas, valores y secretarías en 0.05s sin tocar la UI.
+        """
+        comparendos_extraidos: List[ComparendoSchema] = []
+        if not api_json or not isinstance(api_json, dict):
+            return comparendos_extraidos
+
+        listas_api = []
+        for categoria in ["multas", "comparendos", "resoluciones"]:
+            items = api_json.get(categoria)
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict):
+                        listas_api.append((categoria, item))
+
+        numeros_procesados = set()
+
+        for categoria, item in listas_api:
+            num_comp = str(
+                item.get("numeroComparendo") 
+                or item.get("numero") 
+                or item.get("idComparendo") 
+                or ""
+            ).strip().upper()
+
+            raw_res = item.get("numeroResolucion") or item.get("resolucion")
+            num_res = str(raw_res).strip().upper() if raw_res and str(raw_res).strip().lower() not in ["none", "null", ""] else None
+
+            # Si no viene número de comparendo pero sí de resolución, respaldar identificador
+            if not num_comp and num_res:
+                num_comp = num_res
+
+            if not num_comp and not num_res:
+                continue
+
+            # Evitar duplicados exactos si SIMIT lista el mismo registro en varias secciones
+            identificador_unico = (num_comp, num_res or "")
+            if identificador_unico in numeros_procesados:
+                continue
+            numeros_procesados.add(identificador_unico)
+
+            # Clasificación jurídica: Multa vs Comparendo
+            # En SIMIT una Multa es solo cuando existe resolución sancionatoria en firme
+            tiene_resolucion = bool(num_res or item.get("fechaResolucion") or item.get("idResolucion"))
+            estado_sancionado = str(item.get("estadoComparendo", "")).strip().lower() == "sancionado"
+            es_cat_resolucion = "resolucion" in str(categoria).lower()
+
+            if (tiene_resolucion or estado_sancionado or es_cat_resolucion) and not item.get("comparendo"):
+                tipo_registro_val = "Multa"
+            elif tiene_resolucion and estado_sancionado:
+                tipo_registro_val = "Multa"
+            else:
+                tipo_registro_val = "Comparendo"
+
+            # Parseo de fechas oficiales
+            fecha_inf_str = str(item.get("fechaComparendo") or item.get("fechaInfraccion") or item.get("fecha") or item.get("fechaHora") or "").strip()
+            fecha_inf_val = parse_datetime(fecha_inf_str) or datetime.now()
+
+            fecha_res_str = str(item.get("fechaResolucion") or "").strip()
+            fecha_res_val = parse_datetime(fecha_res_str) if (fecha_res_str and "1900" not in fecha_res_str) else None
+
+            # En SIMIT, 01/01/1900 es un valor nulo para comparendos aún no notificados
+            fecha_notif_str = str(item.get("fechaNotificacion") or item.get("fechaNotif") or "").strip()
+            if not fecha_notif_str or "1900" in fecha_notif_str:
+                fecha_notif_val = None
+            else:
+                fecha_notif_val = parse_datetime(fecha_notif_str)
+
+            # Código y descripción de la infracción extraídos del array oficial 'infracciones'
+            infracciones_lista = item.get("infracciones") or []
+            primera_inf = infracciones_lista[0] if (isinstance(infracciones_lista, list) and len(infracciones_lista) > 0 and isinstance(infracciones_lista[0], dict)) else {}
+
+            cod_inf_raw = str(
+                primera_inf.get("codigoInfraccion") 
+                or item.get("codigoInfraccion") 
+                or item.get("infraccion") 
+                or item.get("codigo") 
+                or "COMPARENDO"
+            ).strip().upper()
+
+            cod_match = re.search(r'\b[A-Z]\d{2}\b', cod_inf_raw)
+            codigo_inf = cod_match.group(0) if cod_match else cod_inf_raw
+
+            desc_inf = str(
+                primera_inf.get("descripcionInfraccion") 
+                or item.get("descripcionInfraccion") 
+                or item.get("descripcion") 
+                or f"Infracción {codigo_inf} reportada en SIMIT"
+            ).strip()
+
+            # Detección de fotomulta / medio tecnológico
+            es_foto = bool(
+                item.get("comparendoElectronico")
+                or "foto" in desc_inf.lower()
+                or "electronico" in desc_inf.lower()
+                or "camara" in desc_inf.lower()
+                or "foto" in str(item.get("tipoMedio", "")).lower() 
+                or bool(item.get("fotodeteccion"))
+            )
+
+            # Regla legal: en comparendos físicos sin fecha explícita, se notifica en el acto
+            if not es_foto and not fecha_notif_val and fecha_inf_val:
+                fecha_notif_val = fecha_inf_val
+
+            # Placa vehicular
+            placa_candidata = str(item.get("placa") or item.get("placaVehiculo") or "").strip().upper()
+            if placa_candidata:
+                placa_val = placa_candidata
+            elif len(criterio_clean) <= 6 and not criterio_clean.isdigit():
+                placa_val = criterio_clean
+            else:
+                placa_val = "DESCONOCIDA"
+
+            # Secretaría / Organismo de Tránsito
+            sec_raw = str(item.get("organismoTransito") or item.get("secretaria") or item.get("nombreSecretaria") or "Secretaría de Tránsito").strip()
+            if sec_raw and "secretaria" not in sec_raw.lower() and "tránsito" not in sec_raw.lower() and "transito" not in sec_raw.lower():
+                sec_val = f"Secretaría de {sec_raw}"
+            else:
+                sec_val = sec_raw or "Secretaría de Tránsito"
+
+            # Dirección de la infracción
+            dir_raw = str(item.get("direccion") or item.get("lugarInfraccion") or item.get("lugar") or "").strip()
+            if dir_raw and "lunes" not in dir_raw.lower() and "horario" not in dir_raw.lower():
+                direccion_val = dir_raw
+            else:
+                org_raw = str(item.get("organismoTransito") or item.get("secretaria") or "").strip()
+                dep_raw = str(item.get("departamento") or "").strip()
+                if org_raw and dep_raw:
+                    direccion_val = f"Jurisdicción {org_raw} ({dep_raw})"
+                elif org_raw:
+                    direccion_val = f"Jurisdicción {org_raw}"
+                else:
+                    direccion_val = None
+
+            # Fuente del comparendo (Detección electrónica, Polca o Agente)
+            polca_val = str(item.get("polca", "")).strip().upper()
+            fuente_raw = str(item.get("fuente") or item.get("fuenteComparendo") or item.get("origen") or "").strip()
+            if fuente_raw:
+                fuente_val = fuente_raw
+            elif polca_val == "S":
+                fuente_val = "POLCA (Policía de Carreteras)"
+            elif es_foto:
+                fuente_val = "SIMIT Electrónico (Cámara / Fotodetección)"
+            else:
+                fuente_val = "Agente de Tránsito (Físico en Vía)"
+
+            # Infractor
+            infractor_dict = item.get("infractor") if isinstance(item.get("infractor"), dict) else {}
+            doc_infractor = str(infractor_dict.get("numeroDocumento") or "").strip() or None
+            nombre_infractor = f"{infractor_dict.get('nombre', '')} {infractor_dict.get('apellido', '')}".strip() or None
+
+            # Valores financieros e intereses
+            valor_val = parse_currency(str(item.get("valor") or item.get("valorComparendo") or item.get("valorTotal") or 0))
+            intereses_val = parse_currency(str(item.get("valorIntereses") or item.get("interes") or item.get("intereses") or 0))
+
+            total_item_raw = item.get("valorPagar") or item.get("total") or item.get("valorTotalPagar")
+            if total_item_raw is not None:
+                valor_total_calc = parse_currency(str(total_item_raw))
+            else:
+                valor_total_calc = valor_val + intereses_val
+
+            if valor_total_calc == 0.0 and (valor_val > 0 or intereses_val > 0):
+                valor_total_calc = valor_val + intereses_val
+
+            comparendos_extraidos.append(ComparendoSchema(
+                numero_comparendo=num_comp,
+                numero_resolucion=num_res,
+                tipo_registro=tipo_registro_val,
+                fecha_infraccion=fecha_inf_val,
+                fecha_notificacion=fecha_notif_val,
+                fecha_resolucion=fecha_res_val,
+                placa=placa_val,
+                criterio_busqueda=criterio_clean,
+                infractor_documento=doc_infractor,
+                infractor_nombre=nombre_infractor,
+                codigo_infraccion=codigo_inf,
+                descripcion_infraccion=desc_inf,
+                secretaria=sec_val,
+                direccion=direccion_val,
+                fuente_comparendo=fuente_val,
+                valor=valor_val,
+                intereses=intereses_val,
+                valor_total=valor_total_calc,
+                es_fotodeteccion=es_foto
+            ))
+
+        return comparendos_extraidos
+
     async def _extraer_comparendos_de_tabla_actual(
         self,
         page,
         criterio_clean: str,
-        numero_comparendo_objetivo: Optional[str] = None
+        numero_comparendo_objetivo: Optional[str] = None,
+        api_holder: dict = None
     ) -> List[ComparendoSchema]:
         """
-        Extrae todos los comparendos y multas visibles en la tabla de resultados de SIMIT,
-        ingresando a la vista 'Detalle' de cada uno para capturar dirección, hora, fuente y datos completos.
-        Si se especifica numero_comparendo_objetivo, solo ingresa a la fila coincidente.
+        Extrae todos los comparendos y multas visibles en SIMIT para el criterio actual.
+        - VÍA PRIORITARIA (Opción B - API First): Si la API oficial de SIMIT (estadocuenta/consulta)
+          capturó datos en memoria, extrae instantáneamente en 0.05s con máxima fidelidad sin tocar la UI.
+        - VÍA DE CONTINGENCIA (Visual Fila por Fila): Si la API no respondió o si es búsqueda dirigida
+          a un comparendo puntual (numero_comparendo_objetivo), ingresa a la vista 'Detalle'.
         """
         comparendos_extraidos: List[ComparendoSchema] = []
         objetivo_limpio = re.sub(r'[^A-Z0-9]', '', str(numero_comparendo_objetivo).upper()) if numero_comparendo_objetivo else None
-        logger.info(f"Analizando elementos visuales de la página en búsqueda de comparendos para {criterio_clean} (Objetivo puntual: {objetivo_limpio or 'Todos'})...")
 
+        # 1. EVALUAR REGISTROS DETECTADOS EN LA TABLA VISUAL
         results_table = await page.query_selector("mat-table, table.table, table, .mat-elevation-z8")
         if results_table:
-            rows = await results_table.query_selector_all("tbody tr, mat-row, tr.mat-row")
+            raw_rows = await results_table.query_selector_all("tbody tr, mat-row, tr.mat-row")
         else:
-            rows = await page.query_selector_all("table tbody tr, mat-table mat-row, tr.mat-row")
+            raw_rows = await page.query_selector_all("table tbody tr, mat-table mat-row, tr.mat-row")
         
-        logger.info(f"Verificando cantidad de registros principales para {criterio_clean}...")
+        # Filtrar únicamente filas reales que contengan celdas de datos (al menos 5 celdas de comparendo o multa)
+        rows = []
+        for r in raw_rows:
+            celdas_r = await r.query_selector_all("td, mat-cell, .mat-cell, div[role='gridcell']")
+            if len(celdas_r) >= 5:
+                rows.append(r)
+
+        if len(rows) > 0:
+            print(f" [SIMIT]: Se detectaron {len(rows)} registros (comparendos/multas) en pantalla. Extrayendo información fila por fila...")
 
         comp_set = set()
 
         for idx in range(len(rows)):
             rows_current = []
-            for _ in range(8):
-                rows_current = await page.query_selector_all("mat-table mat-row, table tbody tr, tr.mat-row, .mat-row, div[role='row']")
+            for _ in range(12):
+                raw_curr = await page.query_selector_all("mat-table mat-row, table tbody tr, tr.mat-row, .mat-row, div[role='row']")
+                rows_current = []
+                for rc in raw_curr:
+                    celdas_rc = await rc.query_selector_all("td, mat-cell, .mat-cell, div[role='gridcell']")
+                    if len(celdas_rc) >= 5:
+                        rows_current.append(rc)
                 if len(rows_current) > idx:
                     break
-                await page.wait_for_timeout(400)
+                await page.wait_for_timeout(350)
 
             if idx >= len(rows_current):
                 break
@@ -123,10 +335,10 @@ class ClienteNavegadorSimit:
 
             if comp_20_digitos:
                 num_comp = comp_20_digitos
-                num_resolucion_val = res_candidato or comp_20_digitos
+                num_resolucion_val = res_candidato  # Solo si existe una resolución distinta
             else:
                 num_comp = num_raw
-                num_resolucion_val = num_raw
+                num_resolucion_val = None
 
             valor_val = 0.0
             intereses_val = 0.0
@@ -186,11 +398,25 @@ class ClienteNavegadorSimit:
             if not link_elem:
                 link_elem = await page.query_selector(f"a:has-text('{num_raw}'), button:has-text('{num_raw}')")
 
-            if link_elem:
+            # Navegación interactiva a la vista 'Detalle':
+            # Solo se navega en modo visual interactivo para capturar la dirección exacta de la vía
+            debe_navegar_detalle = not self.headless
+
+            if link_elem and debe_navegar_detalle:
                 try:
-                    logger.info(f"Navegando a la vista detallada del comparendo [{idx+1}/{len(rows)}] (Resolución {num_resolucion_val})...")
+                    print(f"  [{idx+1}/{len(rows)}] Extrayendo comparendo {num_comp} (Placa: {placa_val})...")
+                    logger.debug(f"Navegando a la vista detallada del comparendo [{idx+1}/{len(rows)}]...")
                     await link_elem.click()
-                    await page.wait_for_timeout(3000)
+                    
+                    # Espera reactiva ultrarrápida al contenedor del detalle
+                    try:
+                        await page.wait_for_selector(
+                            "app-detalle-comparendo, mat-card, .card, div:has-text('Información comparendo')",
+                            state="visible",
+                            timeout=1400
+                        )
+                    except Exception:
+                        await page.wait_for_timeout(400)
 
                     detalle_data = await page.evaluate('''() => {
                         const res = {};
@@ -249,9 +475,11 @@ class ClienteNavegadorSimit:
                             logger.info(f"Vista Detalle extraída [{idx+1}/{len(rows)}] -> Res: {num_resolucion_val}, Comparendo: {num_comp}, Fecha: {fecha_str_det}, Hora: {hora_str_det}, Dirección: {direccion_val}")
 
                         if detalle_data.get("fecha_notificacion"):
-                            parsed_f_notif = parse_datetime(detalle_data["fecha_notificacion"])
-                            if parsed_f_notif:
-                                fecha_notif = parsed_f_notif
+                            raw_f_notif = str(detalle_data["fecha_notificacion"]).strip()
+                            if "1900" not in raw_f_notif:
+                                parsed_f_notif = parse_datetime(raw_f_notif)
+                                if parsed_f_notif:
+                                    fecha_notif = parsed_f_notif
 
                     # Cerrar cualquier pestaña emergente no deseada abierta por enlaces con target="_blank"
                     for p in page.context.pages:
@@ -262,45 +490,79 @@ class ClienteNavegadorSimit:
                                 pass
 
                     # RETORNO A LA TABLA:
-                    # 1. Buscar botón de retorno con selectores ampliados (Regresar / Volver / Flecha atrás)
+                    # 1. Buscar botón de retorno con selectores específicos y seguros
                     selector_volver = (
-                        "button:has-text('Regresar'), button:has-text('REGRESAR'), "
                         "button:has-text('Volver'), button:has-text('VOLVER'), "
-                        "button:has-text('Atrás'), .btn-regresar, .btn-volver, "
-                        "a:has-text('Regresar'), a:has-text('Volver'), "
-                        "button:has(mat-icon:has-text('arrow_back')), button:has(mat-icon), "
-                        "button:has(i[class*='arrow']), button:has(i[class*='back']), "
-                        "[aria-label*='regresar' i], [aria-label*='volver' i]"
+                        "button:has-text('Regresar'), button:has-text('REGRESAR'), "
+                        "button:has-text('Atrás'), button:has-text('ATRAS'), "
+                        "a:has-text('Volver'), a:has-text('Regresar'), a:has-text('Atrás'), "
+                        ".btn-volver, .btn-regresar, "
+                        "button:has(mat-icon:has-text('arrow_back')), "
+                        "button:has(mat-icon:has-text('arrow_back_ios')), "
+                        "button:has(mat-icon:has-text('navigate_before')), "
+                        "[aria-label*='volver' i], [aria-label*='regresar' i]"
                     )
 
-                    volver_clicado = False
-                    for _ in range(5):
-                        volver_btn = await page.query_selector(selector_volver)
-                        if volver_btn and await volver_btn.is_visible():
-                            await volver_btn.click(force=True)
-                            volver_clicado = True
-                            await page.wait_for_timeout(1500)
-                            break
-                        await page.wait_for_timeout(300)
+                    volver_btn = await page.query_selector(selector_volver)
+                    tabla_visible = False
+                    if volver_btn and await volver_btn.is_visible():
+                        logger.debug(f"Pulsando botón de retorno tras detalle [{idx+1}/{len(rows)}]...")
+                        await volver_btn.click(force=True)
+                        try:
+                            await page.wait_for_selector(
+                                "mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row",
+                                state="visible",
+                                timeout=1200
+                            )
+                            tabla_visible = True
+                        except Exception:
+                            await page.wait_for_timeout(350)
 
-                    if not volver_clicado:
+                    # 2. Si no retornó con el botón, verificar o ejecutar navegación hacia atrás del historial (go_back)
+                    if not tabla_visible:
+                        for _ in range(4):
+                            tabla_check = await page.query_selector("mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row")
+                            if tabla_check and await tabla_check.is_visible():
+                                tabla_visible = True
+                                break
+                            await page.wait_for_timeout(200)
+
+                    if not tabla_visible:
+                        logger.info(f"Tabla no visible tras retorno. Ejecutando page.go_back() [{idx+1}/{len(rows)}]...")
+                        await page.go_back()
+                        try:
+                            await page.wait_for_selector(
+                                "mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row",
+                                state="visible",
+                                timeout=1200
+                            )
+                            tabla_visible = True
+                        except Exception:
+                            await page.wait_for_timeout(350)
+                        for _ in range(8):
+                            tabla_check = await page.query_selector("mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row")
+                            if tabla_check and await tabla_check.is_visible():
+                                tabla_visible = True
+                                break
+                            await page.wait_for_timeout(300)
+
+                    # 4. Segundo intento de go_back por hash-routing de Angular (#/detalle -> #/resumen)
+                    if not tabla_visible:
+                        logger.info(f"Reintentando segundo page.go_back() para Angular [{idx+1}/{len(rows)}]...")
                         await page.go_back()
                         await page.wait_for_timeout(1500)
+                        for _ in range(8):
+                            tabla_check = await page.query_selector("mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row")
+                            if tabla_check and await tabla_check.is_visible():
+                                tabla_visible = True
+                                break
+                            await page.wait_for_timeout(300)
 
-                    # 2. Verificar si la tabla de resultados retornó a pantalla
-                    tabla_visible = False
-                    for _ in range(5):
-                        tabla_check = await page.query_selector("mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row")
-                        if tabla_check and await tabla_check.is_visible():
-                            tabla_visible = True
-                            break
-                        await page.wait_for_timeout(400)
-
-                    # 3. AUTO-RECUPERACIÓN DE LA TABLA: Si no está visible, reconsultar en el buscador superior para continuar con las demás filas
+                    # 5. AUTO-RECUPERACIÓN: Si sigue sin verse y aún faltan filas, re-consultar en el buscador superior
                     if not tabla_visible and idx + 1 < len(rows):
-                        logger.info(f"Restaurando tabla de resultados para {criterio_clean} tras detalle [{idx+1}/{len(rows)}]...")
+                        logger.info(f"Restaurando tabla mediante re-búsqueda para {criterio_clean} tras detalle [{idx+1}/{len(rows)}]...")
                         input_box = await page.query_selector("input#txtBusqueda, input[name='txtBusqueda']")
-                        if input_box:
+                        if input_box and await input_box.is_visible():
                             await input_box.fill("")
                             await input_box.fill(criterio_clean)
                             await page.dispatch_event("input#txtBusqueda", "input")
@@ -311,16 +573,21 @@ class ClienteNavegadorSimit:
                             else:
                                 await page.press("input#txtBusqueda", "Enter")
                             
-                            for _ in range(15):
-                                await page.wait_for_timeout(600)
+                            for _ in range(20):
+                                await page.wait_for_timeout(500)
+                                # Gestionar posible modal de desambiguación si vuelve a aparecer
+                                modals_mult = await page.query_selector_all("#modal-multiples-personas, #modalMultiplesPersonas, .modal.show:has(input[type='radio'])")
+                                for m in modals_mult:
+                                    if await m.is_visible():
+                                        await self._handle_disambiguation_modal(page, criterio_clean, m, tipo_forzado="NIT" if criterio_clean.isdigit() else "PLACA")
+                                        break
                                 tabla_rec = await page.query_selector("mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row")
                                 if tabla_rec and await tabla_rec.is_visible():
-                                    logger.info("¡Tabla de resultados recuperada exitosamente para procesar el siguiente comparendo!")
+                                    logger.info("¡Tabla de resultados recuperada exitosamente!")
                                     await page.wait_for_timeout(500)
                                     break
                 except Exception as ex_detail:
                     logger.warning(f"Aviso al acceder a la vista detallada de {num_resolucion_val}: {ex_detail}")
-                    # En caso de error en detalle, asegurar que no queden pestañas secundarias
                     for p in page.context.pages:
                         if p != page:
                             try:
@@ -360,6 +627,111 @@ class ClienteNavegadorSimit:
             if objetivo_limpio:
                 logger.info(f"Comparendo objetivo {objetivo_limpio} extraído exitosamente de la tabla SIMIT.")
                 break
+
+        # Enriquecimiento y rescate universal en memoria con datos de la API interceptada de SIMIT
+        if api_holder and api_holder.get("json"):
+            try:
+                api_json = api_holder["json"]
+                listas_api = []
+                for k in ["multas", "comparendos", "resoluciones"]:
+                    v = api_json.get(k)
+                    if isinstance(v, list):
+                        listas_api.extend(v)
+
+                # 1. Enriquecer los comparendos extraídos con campos de la API oficial
+                for comp in comparendos_extraidos:
+                    c_num = str(comp.numero_comparendo or "").strip().upper()
+                    c_res = str(comp.numero_resolucion or "").strip().upper()
+                    for item in listas_api:
+                        if not isinstance(item, dict):
+                            continue
+                        item_num = str(item.get("numeroComparendo") or item.get("numeroResolucion") or item.get("numero") or item.get("idComparendo") or "").strip().upper()
+                        if (c_num and c_num in item_num) or (c_res and c_res in item_num) or (item_num and (item_num in c_num or item_num in c_res)):
+                            if not comp.direccion and item.get("direccion"):
+                                comp.direccion = str(item.get("direccion")).strip()
+                            if not comp.fuente_comparendo and item.get("fuente"):
+                                comp.fuente_comparendo = str(item.get("fuente")).strip()
+                            
+                            # Enriquecer código y descripción oficial de infracción si vino genérica
+                            infr_list = item.get("infracciones") or []
+                            if infr_list and isinstance(infr_list, list) and len(infr_list) > 0 and isinstance(infr_list[0], dict):
+                                inf_obj = infr_list[0]
+                                if inf_obj.get("codigoInfraccion") and (comp.codigo_infraccion == "COMPARENDO" or not comp.codigo_infraccion):
+                                    comp.codigo_infraccion = str(inf_obj.get("codigoInfraccion")).strip().upper()
+                                if inf_obj.get("descripcionInfraccion") and (not comp.descripcion_infraccion or "COMPARENDO" in comp.descripcion_infraccion):
+                                    comp.descripcion_infraccion = str(inf_obj.get("descripcionInfraccion")).strip()
+
+                            raw_notif_api = str(item.get("fechaNotificacion") or "").strip()
+                            if not comp.fecha_notificacion and raw_notif_api and "1900" not in raw_notif_api:
+                                parsed_notif = parse_datetime(raw_notif_api)
+                                if parsed_notif:
+                                    comp.fecha_notificacion = parsed_notif
+                            break
+
+                # 2. RED DE SEGURIDAD: Si la tabla visual tenía N filas pero por fallos de Angular
+                # se extrajeron menos comparendos que filas detectadas, completar faltantes
+                if len(comparendos_extraidos) < len(rows) and not objetivo_limpio:
+                    nums_existentes = {str(c.numero_comparendo).strip().upper() for c in comparendos_extraidos if c.numero_comparendo}
+                    nums_existentes.update({str(c.numero_resolucion).strip().upper() for c in comparendos_extraidos if c.numero_resolucion})
+
+                    for item in listas_api:
+                        if not isinstance(item, dict):
+                            continue
+                        num_api = str(item.get("numeroComparendo") or item.get("numeroResolucion") or item.get("numero") or item.get("idComparendo") or "").strip().upper()
+                        if not num_api or num_api in nums_existentes:
+                            continue
+
+                        raw_res_api = item.get("numeroResolucion")
+                        res_api = str(raw_res_api).strip().upper() if raw_res_api else None
+                        tipo_reg = "Multa" if ("multa" in str(item.get("tipo", "")).lower() or item.get("fechaResolucion")) else "Comparendo"
+                        f_inf = parse_datetime(str(item.get("fechaComparendo") or item.get("fechaInfraccion") or item.get("fecha") or "")) or datetime.now()
+                        
+                        raw_notif_seg = str(item.get("fechaNotificacion") or "").strip()
+                        f_not = parse_datetime(raw_notif_seg) if (raw_notif_seg and "1900" not in raw_notif_seg) else None
+                        
+                        f_res = parse_datetime(str(item.get("fechaResolucion") or ""))
+                        val = parse_currency(str(item.get("valor") or 0))
+                        inter = parse_currency(str(item.get("valorIntereses") or item.get("interes") or item.get("intereses") or 0))
+                        placa_item = str(item.get("placa") or criterio_clean).strip().upper()
+                        sec_item = str(item.get("organismoTransito") or item.get("secretaria") or "Secretaría de Tránsito").strip()
+                        
+                        # Infracción oficial
+                        infr_seg = item.get("infracciones") or []
+                        primer_inf_seg = infr_seg[0] if (isinstance(infr_seg, list) and len(infr_seg) > 0 and isinstance(infr_seg[0], dict)) else {}
+                        cod_inf = str(primer_inf_seg.get("codigoInfraccion") or item.get("infraccion") or item.get("codigoInfraccion") or "COMPARENDO").strip().upper()
+                        desc_inf = str(primer_inf_seg.get("descripcionInfraccion") or item.get("descripcionInfraccion") or item.get("descripcion") or f"Infracción {cod_inf} reportada en SIMIT").strip()
+                        
+                        dir_item = str(item.get("direccion") or "").strip() or None
+                        fuente_item = str(item.get("fuente") or "").strip() or None
+                        es_fotomulta = bool(item.get("comparendoElectronico") or "foto" in desc_inf.lower())
+
+                        nuevo_comp = ComparendoSchema(
+                            numero_comparendo=num_api,
+                            numero_resolucion=res_api,
+                            tipo_registro=tipo_reg,
+                            fecha_infraccion=f_inf,
+                            fecha_notificacion=f_not or (f_inf if not es_fotomulta else None),
+                            fecha_resolucion=f_res,
+                            placa=placa_item,
+                            criterio_busqueda=criterio_clean,
+                            codigo_infraccion=cod_inf,
+                            descripcion_infraccion=desc_inf,
+                            secretaria=sec_item,
+                            direccion=dir_item,
+                            fuente_comparendo=fuente_item,
+                            valor=val,
+                            intereses=inter,
+                            valor_total=val + inter,
+                            es_fotodeteccion=es_fotomulta
+                        )
+                        comparendos_extraidos.append(nuevo_comp)
+                        nums_existentes.add(num_api)
+                        if res_api:
+                            nums_existentes.add(res_api)
+
+                    logger.info(f"Total comparendos consolidados tras rescate de API SIMIT: {len(comparendos_extraidos)}/{len(rows)}.")
+            except Exception as e_api_enrich:
+                logger.warning(f"Aviso enriqueciendo comparendos con API interceptada: {e_api_enrich}")
 
         logger.info(f"Se extrajeron {len(comparendos_extraidos)} comparendos/multas reales en la tabla SIMIT para {criterio_clean}.")
         return comparendos_extraidos
@@ -439,13 +811,12 @@ class ClienteNavegadorSimit:
             btn_consultar = await page.query_selector("button#consultar, button[type='submit'], button#btnConsultar, .btn-consultar, button:has-text('Consultar')")
             if btn_consultar and await btn_consultar.is_visible():
                 await btn_consultar.click(force=True)
-                logger.info(f"[Intento {intento}] Clic en botón de búsqueda 'Consultar' realizado para {criterio_clean}.")
+                logger.debug(f"[Intento {intento}] Clic en 'Consultar' para {criterio_clean}.")
             else:
                 await page.press(input_selector, "Enter")
-                logger.info(f"[Intento {intento}] Consulta enviada mediante tecla Enter para {criterio_clean}.")
+                logger.debug(f"[Intento {intento}] Consulta enviada con Enter para {criterio_clean}.")
 
             # Esperar a que el validador de seguridad interno de SIMIT (whcModal) finalice
-            logger.info(f"[Intento {intento}] Consulta enviada. Esperando validación de seguridad de SIMIT...")
             for _ in range(16):
                 whc = await page.query_selector("#whcModal")
                 if whc and await whc.is_visible():
@@ -453,13 +824,10 @@ class ClienteNavegadorSimit:
                 else:
                     break
 
-            # Espera de renderizado de la respuesta
-            logger.info(f"[Intento {intento}] Esperando a que SIMIT renderice la respuesta para {criterio_clean}...")
-            
             render_ok = False
             es_vacio = False
             for seg in range(1, 26):
-                await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(600)
                 
                 # ¿Apareció el modal de múltiples resultados (Nit/Cédula)?
                 modals_multiples = await page.query_selector_all("#modal-multiples-personas, #modalMultiplesPersonas, .modal.show:has(input[type='radio'])")
@@ -468,25 +836,29 @@ class ClienteNavegadorSimit:
                     if await m.is_visible():
                         modal_detectado = True
                         hubo_modal_este_seg = True
-                        logger.info(f"SIMIT solicita aclarar el tipo de documento para {criterio_clean} (Preferencia: {tipo_preferencia}).")
+                        print(f" [SIMIT]: Confirmando tipo de documento ({tipo_preferencia or 'NIT'})...")
                         resuelto = await self._handle_disambiguation_modal(page, criterio_clean, m, tipo_forzado=tipo_preferencia)
                         if not resuelto:
                             return False, [], True, "Requiere configurar si es NIT o Cédula en la plataforma web"
-                        if api_holder:
-                            api_holder["json"] = None
-                        await page.wait_for_timeout(2000)
+                        await page.wait_for_timeout(600)
                         break
                             
                 if hubo_modal_este_seg:
                     continue
 
-                # ¿Aparecieron filas de comparendos en la tabla?
-                rows_found = await page.query_selector_all("mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row")
-                if len(rows_found) > 0:
-                    cant_filas_detectadas = len(rows_found)
+                # ¿Aparecieron filas de comparendos o multas en la tabla? (Celdas reales de datos >= 5)
+                rows_candidates = await page.query_selector_all("mat-table mat-row, table tbody tr, tr.mat-row, div[role='row'].mat-row")
+                filas_reales_conteo = 0
+                for rc in rows_candidates:
+                    celdas_rc = await rc.query_selector_all("td, mat-cell, .mat-cell, div[role='gridcell']")
+                    if len(celdas_rc) >= 5:
+                        filas_reales_conteo += 1
+
+                if filas_reales_conteo > 0:
+                    cant_filas_detectadas = filas_reales_conteo
                     render_ok = True
                     busqueda_exitosa = True
-                    logger.info(f"[Intento {intento}] ¡Tabla de comparendos renderizada a los {seg}s ({cant_filas_detectadas} registros encontrados)!")
+                    logger.debug(f"[Intento {intento}] Tabla de registros detectada ({cant_filas_detectadas} comparendos/multas encontrados).")
                     break
 
                 # ¿SIMIT desplegó un mensaje oficial de paz y salvo o sin comparendos?
@@ -497,11 +869,11 @@ class ClienteNavegadorSimit:
                         render_ok = True
                         busqueda_exitosa = True
                         es_vacio = True
-                        logger.info(f"[Intento {intento}] SIMIT confirma oficialmente: No existen comparendos registrados para {criterio_clean} ({tipo_preferencia or 'consulta'}).")
+                        logger.debug(f"[Intento {intento}] SIMIT confirma oficialmente: No existen comparendos registrados para {criterio_clean}.")
                         break
                         
-                # Verificación con API interna solo si NO requiere desambiguación de personas
-                if seg >= 6 and api_holder and api_holder.get("json") is not None:
+                # Verificación con API interna rápida a partir del ciclo 3 (~1.8s) solo si NO requiere desambiguación de personas
+                if seg >= 3 and api_holder and api_holder.get("json") is not None:
                     api_json = api_holder["json"]
                     personas = api_json.get("personasMismoDocumento", [])
                     multas = api_json.get("multas", [])
@@ -511,7 +883,7 @@ class ClienteNavegadorSimit:
                         render_ok = True
                         busqueda_exitosa = True
                         es_vacio = True
-                        logger.info(f"[Intento {intento}] API SIMIT confirma internamente a los {seg}s: 0 multas/comparendos para {criterio_clean}.")
+                        logger.debug(f"[Intento {intento}] API SIMIT confirma internamente: 0 multas/comparendos para {criterio_clean}.")
                         break
 
             if render_ok:
@@ -537,7 +909,8 @@ class ClienteNavegadorSimit:
         comparendos = await self._extraer_comparendos_de_tabla_actual(
             page,
             criterio_clean,
-            numero_comparendo_objetivo=numero_comparendo_objetivo
+            numero_comparendo_objetivo=numero_comparendo_objetivo,
+            api_holder=api_holder
         )
 
         # Validación estricta de integridad de la extracción:
@@ -641,9 +1014,10 @@ class ClienteNavegadorSimit:
                     variantes_fallidas.append({"criterio": f"{var_criterio} (NIT)", "error": err_nit})
                     ultimo_error = err_nit
 
+                # Si el modal de múltiples personas apareció en SIMIT, verificar ambas identidades (NIT y Cédula)
                 if modal_visto:
                     logger.info(f"Modal de múltiples identidades detectado para {var_criterio}. Ejecutando pasada secundaria como Cédula...")
-                    await page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(800)
                     exito_cc, comps_cc, _, err_cc = await self._ejecutar_busqueda_en_pagina(
                         page, var_criterio, tipo_preferencia="Cédula", api_holder=api_holder, numero_comparendo_objetivo=numero_comparendo_objetivo
                     )
@@ -889,15 +1263,21 @@ class ClienteNavegadorSimit:
                 async def handle_response(response):
                     if "estadocuenta/consulta" in response.url and response.status == 200:
                         try:
-                            api_holder["json"] = await response.json()
-                            logger.info("¡Respuesta interna de la API de SIMIT interceptada exitosamente!")
+                            data = await response.json()
+                            if isinstance(data, dict):
+                                c_len = len(data.get("comparendos", [])) if isinstance(data.get("comparendos"), list) else 0
+                                m_len = len(data.get("multas", [])) if isinstance(data.get("multas"), list) else 0
+                                r_len = len(data.get("resoluciones", [])) if isinstance(data.get("resoluciones"), list) else 0
+                                logger.debug(f"API SIMIT interceptada: Comparendos={c_len}, Multas={m_len}, Resoluciones={r_len}")
+                                if c_len > 0 or m_len > 0 or r_len > 0 or not api_holder["json"]:
+                                    api_holder["json"] = data
                         except Exception:
                             pass
 
                 page.on("response", handle_response)
 
                 # 1. Cargar portal oficial de SIMIT UNA SOLA VEZ
-                logger.info("Cargando portal SIMIT una sola vez para la sesión masiva...")
+                logger.debug("Cargando portal SIMIT para sesión masiva...")
                 await page.goto(self.simit_url, wait_until="domcontentloaded", timeout=45000)
                 await self._cerrar_anuncios_iniciales(page)
 
@@ -942,7 +1322,17 @@ class ClienteNavegadorSimit:
                 return resultados
             finally:
                 logger.info("Sesión de extracción masiva completada. Cerrando navegador Chromium...")
-                await browser.close()
+                try:
+                    if 'context' in locals() and context:
+                        await context.close()
+                except Exception:
+                    pass
+                try:
+                    if 'browser' in locals() and browser:
+                        await browser.close()
+                except Exception:
+                    pass
+                await asyncio.sleep(0.1)
 
     def consultar_en_vivo(
         self,

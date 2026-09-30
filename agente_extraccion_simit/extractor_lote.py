@@ -15,9 +15,8 @@ from agente_extraccion_simit.cliente import ClienteSimit
 from agente_extraccion_simit.extractor_principal import guardar_resultado_extraccion
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    level=logging.WARNING,
+    format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger("ExtractorLote")
 

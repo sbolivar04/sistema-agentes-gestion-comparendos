@@ -11,11 +11,10 @@ from base_datos.conexion import inicializar_base_datos, obtener_sesion_bd
 from agente_extraccion_simit.cliente import ClienteSimit
 from base_datos.repositorio import RepositorioBaseDatos
 
-# Configurar logging visible en consola
+# Configurar logging para capturar advertencias y errores sin saturar la consola
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    level=logging.WARNING,
+    format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger("ExtractorPrincipal")
 
@@ -33,10 +32,9 @@ def ejecutar_extraccion(
     print("      AGENTE DE EXTRACCIÓN Y VALIDACIÓN DE COMPARENDOS SIMIT (IA FLOTAS)     ")
     print("=" * 80)
     if not sin_interfaz:
-        print(" *** INICIANDO EXTRACCIÓN VISUAL EN TIEMPO REAL ***")
-        print(" >>> Se abrirá una ventana de Chrome/Edge en tu pantalla para navegar en SIMIT.")
+        print(" [MODO VISUAL]: Navegación interactiva en pantalla fila por fila.")
     else:
-        print(" *** INICIANDO EXTRACCIÓN EN SEGUNDO PLANO (HEADLESS) ***")
+        print(" [MODO SEGUNDO PLANO]: Ejecutando en segundo plano (headless).")
     print("=" * 80)
 
     # 1. Inicializar esquema de Base de Datos en Supabase
@@ -47,13 +45,13 @@ def ejecutar_extraccion(
 
     # 3. Ejecutar extracción
     if numero_comparendo_objetivo:
-        print(f"\n[PASO 1] Consultando SIMIT en vivo para la Placa {criterio} (Comparendo/Resolución puntual: {numero_comparendo_objetivo})")
+        print(f"\n[SIMIT]: Consultando registros para {tipo_consulta} {criterio} (Objetivo: {numero_comparendo_objetivo})...")
         resultado = cliente.consultar_por_placa(criterio, numero_comparendo_objetivo=numero_comparendo_objetivo)
     elif tipo_consulta == "NIT":
-        print(f"\n[PASO 1] Consultando SIMIT en vivo para el NIT: {criterio}")
+        print(f"\n[SIMIT]: Consultando registros para el NIT {criterio}...")
         resultado = cliente.consultar_por_nit(criterio)
     else:
-        print(f"\n[PASO 1] Consultando SIMIT en vivo para la Placa: {criterio}")
+        print(f"\n[SIMIT]: Consultando registros para la Placa {criterio}...")
         resultado = cliente.consultar_por_placa(criterio)
 
     # 4. Guardar en Base de Datos y reportar
@@ -176,22 +174,22 @@ def guardar_resultado_extraccion(
         print(f"\n [{idx}] {tipo_str} #: {c.numero_comparendo}{res_str} | Placa: {c.placa}")
         print(f"     Infracción : {c.codigo_infraccion} - {c.descripcion_infraccion}")
         print(f"     Secretaría : {c.secretaria}")
-        if c.direccion:
-            print(f"     Dirección  : {c.direccion}")
-        if c.fuente_comparendo:
-            print(f"     Fuente     : {c.fuente_comparendo}")
+        print(f"     Dirección  : {c.direccion or 'No registra'}")
+        print(f"     Fuente     : {c.fuente_comparendo or 'SIMIT'}")
         print(f"     Fecha Inf. : {c.fecha_infraccion.strftime('%Y-%m-%d %H:%M:%S')}")
         if c.fecha_notificacion:
             print(f"     Fecha Notif: {c.fecha_notificacion.strftime('%Y-%m-%d')}")
         else:
-            print(f"     Fecha Notif: No aplica/No registra")
+            print(f"     Fecha Notif: Sin notificar (Pendiente de notificación oficial)")
         if c.tipo_registro == "Multa" and c.fecha_resolucion:
             print(f"      Resolución: {c.fecha_resolucion.strftime('%d/%m/%Y')}")
         print(f"      Valor: ${c.valor:,.0f} | Intereses: ${c.intereses:,.0f} | Total: ${c.valor_total:,.0f}")
         if c.aplica_descuento_50:
-            print(f"     [¡VIGENTE DESCUENTO 50%!] Paga solo: ${c.valor_con_descuento_50:,.2f} COP (Límite: {c.fecha_limite_descuento_50})")
+            limite_txt = f"(Límite: {c.fecha_limite_descuento_50})" if c.fecha_limite_descuento_50 else "(Sin notificar formalmente / Términos no iniciados)"
+            print(f"     [¡VIGENTE DESCUENTO 50%!] Paga solo: ${c.valor_con_descuento_50:,.2f} COP {limite_txt}")
         elif c.aplica_descuento_25:
-            print(f"     [VIGENTE DESCUENTO 25%] Paga solo: ${c.valor_con_descuento_25:,.2f} COP (Límite: {c.fecha_limite_descuento_25})")
+            limite_txt = f"(Límite: {c.fecha_limite_descuento_25})" if c.fecha_limite_descuento_25 else "(Sin notificar formalmente / Términos no iniciados)"
+            print(f"     [VIGENTE DESCUENTO 25%] Paga solo: ${c.valor_con_descuento_25:,.2f} COP {limite_txt}")
         else:
             print(f"     [DESCUENTO VENCIDO] Debe pagar el 100%: ${c.valor_total:,.2f} COP")
 
