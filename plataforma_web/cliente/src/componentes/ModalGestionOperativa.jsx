@@ -123,6 +123,8 @@ function resolverDatosGestionInicial(datos, comp) {
 
   const distPagoInicial = datos.distribucionPago || datos.distribucion_pago
   const esDeBajaInicial = distPagoInicial === 'de_baja'
+  const esDescuentoOpcionalInicial = distPagoInicial === '100_empresa' || distPagoInicial === '100_cliente'
+  const soporteFirmaReqInicial = !esDeBajaInicial && !esDescuentoOpcionalInicial
 
   const paso1CompletoDatos = Boolean(
     (datos.paso1Completo === true || datos.paso1_completo === true) || (
@@ -133,7 +135,7 @@ function resolverDatosGestionInicial(datos, comp) {
             (datos.responsableDocumento || datos.responsable_documento) &&
             distPagoInicial &&
             (datos.soporteCorreo || datos.soporte_correo) &&
-            (datos.soporteFirma || datos.soporte_firma)
+            (!soporteFirmaReqInicial || (datos.soporteFirma || datos.soporte_firma))
           )
     )
   )
@@ -319,6 +321,9 @@ export function ModalGestionOperativa({ comparendo, gestionInicial, alCerrar, al
   }
 
   const esDeBaja = distribucionPago === 'de_baja'
+  const esDescuentoOpcional = distribucionPago === '100_empresa' || distribucionPago === '100_cliente'
+  const soporteFirmaRequerido = !esDeBaja && !esDescuentoOpcional
+  const soporteFirmaValido = soporteFirmaRequerido ? Boolean(soporteFirma) : true
 
   // Validación de Cédula de Ciudadanía: Rango obligatorio estricto entre 6 y 10 dígitos numéricos
   // Menos de 6 dígitos = Inválido (celda mala) | Más de 10 dígitos = Inválido (celda mala)
@@ -332,8 +337,9 @@ export function ModalGestionOperativa({ comparendo, gestionInicial, alCerrar, al
   // Determinar si la celda de cédula tiene error visual (se pone en rojo con alerta)
   const cedulaTieneError = (cantDigitosCedula > 0 && (cantDigitosCedula < 6 || cantDigitosCedula > 10)) || errorCedulaLongitud
 
-  // Validación estricta del Paso 1: todos los campos obligatorios (*) y los 2 soportes requeridos cargados
+  // Validación estricta del Paso 1: todos los campos obligatorios (*) y los soportes requeridos cargados
   // Regla especial de baja: si se selecciona "De baja", ÚNICAMENTE el soporte de aprobación por correo es obligatorio (y cédula válida si se digitó)
+  // Regla especial de empresa o cliente: si es 100% empresa o 100% cliente, el Descuento en Blanco es opcional
   const fase1Completa = esDeBaja
     ? Boolean(soporteCorreo && cedulaValida)
     : Boolean(
@@ -342,7 +348,7 @@ export function ModalGestionOperativa({ comparendo, gestionInicial, alCerrar, al
         cedulaValida && 
         distribucionPago && 
         soporteCorreo && 
-        soporteFirma
+        soporteFirmaValido
       )
 
   // Validación del Paso 2: si es "De baja", se considera listo al completar el Paso 1 (con $0 y fecha automática)
@@ -391,6 +397,8 @@ export function ModalGestionOperativa({ comparendo, gestionInicial, alCerrar, al
 
       const distPagoGuardado = datos.distribucionPago || datos.distribucion_pago
       const esDeBajaGuardado = distPagoGuardado === 'de_baja'
+      const esDescuentoOpcionalGuardado = distPagoGuardado === '100_empresa' || distPagoGuardado === '100_cliente'
+      const soporteFirmaReqGuardado = !esDeBajaGuardado && !esDescuentoOpcionalGuardado
 
       const paso1CompletoDatos = Boolean(
         (datos.paso1Completo === true || datos.paso1_completo === true) || (
@@ -401,7 +409,7 @@ export function ModalGestionOperativa({ comparendo, gestionInicial, alCerrar, al
                 (datos.responsableDocumento || datos.responsable_documento) &&
                 distPagoGuardado &&
                 (datos.soporteCorreo || datos.soporte_correo) &&
-                (datos.soporteFirma || datos.soporte_firma)
+                (!soporteFirmaReqGuardado || (datos.soporteFirma || datos.soporte_firma))
               )
         )
       )
@@ -1330,7 +1338,7 @@ export function ModalGestionOperativa({ comparendo, gestionInicial, alCerrar, al
                         titulo: 'Descuento en Blanco',
                         subtitulo: 'Formato físico firmado por el conductor o responsable',
                         icono: FileText,
-                        esObligatorio: !esDeBaja,
+                        esObligatorio: !esDeBaja && !esDescuentoOpcional,
                         esDesactivadoBaja: esDeBaja && !soporteFirma,
                         soporte: soporteFirma,
                         tipoSoporte: 'firma',
@@ -1739,7 +1747,9 @@ export function ModalGestionOperativa({ comparendo, gestionInicial, alCerrar, al
                                   ? "Ingrese un número de cédula válido (entre 6 y 10 dígitos) para continuar"
                                   : (esDeBaja 
                                       ? "Adjunte la aprobación por correo para continuar con el trámite de baja" 
-                                      : "Complete los campos obligatorios (*) y adjunte los 2 soportes requeridos en el Paso 1 para continuar")))
+                                      : (esDescuentoOpcional
+                                          ? "Complete los campos obligatorios (*) y adjunte la aprobación por correo para continuar"
+                                          : "Complete los campos obligatorios (*) y adjunte los 2 soportes requeridos en el Paso 1 para continuar"))))
                           : (esDeBaja 
                               ? "Avanzar al Paso 3: Resumen y Descargue SIMIT (Valor: $0)" 
                               : "Avanzar al Paso 2: Pago y Facturación"))

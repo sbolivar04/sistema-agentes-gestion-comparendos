@@ -104,10 +104,12 @@ export function TablaComparendos({
 
       const distPago = datos.distribucionPago || datos.distribucion_pago
       const esDeBaja = distPago === 'de_baja'
+      const esDescuentoOpcional = distPago === '100_empresa' || distPago === '100_cliente'
+      const soporteFirmaRequerido = !esDeBaja && !esDescuentoOpcional
 
       // Verificación estricta de Paso 1 completo:
       // Si es "De baja", solo requiere el soporte de aprobación por correo
-      // Si no es de baja, requiere nombre, cédula, asignación de pago y ambos soportes obligatorios (correo y autorización firmada)
+      // Si es 100% Empresa o 100% Cliente, Descuento en Blanco es opcional
       const digitosDoc = String(datos.responsableDocumento || datos.responsable_documento || '').replace(/\D/g, '')
       const cedulaValida = esDeBaja
         ? (digitosDoc.length === 0 || (digitosDoc.length >= 6 && digitosDoc.length <= 10))
@@ -122,7 +124,7 @@ export function TablaComparendos({
                 cedulaValida &&
                 distPago &&
                 (datos.soporteCorreo || datos.soporte_correo || datos.tiene_soporte_correo) &&
-                (datos.soporteFirma || datos.soporte_firma || datos.tiene_soporte_firma)
+                (!soporteFirmaRequerido || (datos.soporteFirma || datos.soporte_firma || datos.tiene_soporte_firma))
               )
         )
       )
