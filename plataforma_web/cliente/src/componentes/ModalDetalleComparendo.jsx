@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { EtiquetaTooltip } from './EtiquetaTooltip'
 import { useFlota } from '../contexto/ContextoFlota'
+import { obtenerDescripcionInfraccion, normalizarCodigoInfraccion } from '../utilidades/catalogoInfracciones'
 
 /**
  * Componente ModalDetalleComparendo (Diseño Ejecutivo 2 Columnas)
@@ -226,7 +227,7 @@ export function ModalDetalleComparendo({ comparendo: comparendoProp, alCerrar })
                   border: '1px solid rgba(2, 132, 199, 0.25)'
                 }}
               >
-                Infracción {comparendo.codigo_infraccion || 'N/A'}
+                Infracción {normalizarCodigoInfraccion(comparendo.codigo_infraccion) || comparendo.codigo_infraccion || 'N/A'}
               </span>
 
               <span className={`chip-estado ${esPagado ? 'inactivo' : 'activo'}`}>
@@ -497,15 +498,20 @@ export function ModalDetalleComparendo({ comparendo: comparendoProp, alCerrar })
           </div>
 
           {/* Fila Inferior: Descripción Oficial de la Infracción (Ancho Completo) */}
-          {comparendo.descripcion_infraccion && (
-            <div className="modal-caja-descripcion">
-              <Info size={16} color="var(--color-primario)" style={{ flexShrink: 0, marginTop: '2px' }} />
-              <p>
-                <strong style={{ color: 'var(--texto-principal)' }}>Descripción legal ({comparendo.codigo_infraccion}): </strong>
-                {comparendo.descripcion_infraccion}
-              </p>
-            </div>
-          )}
+          {(() => {
+            const descOficial = obtenerDescripcionInfraccion(comparendo.codigo_infraccion, comparendo.descripcion_infraccion)
+            const codNormalizado = normalizarCodigoInfraccion(comparendo.codigo_infraccion) || comparendo.codigo_infraccion
+            if (!descOficial) return null
+            return (
+              <div className="modal-caja-descripcion">
+                <Info size={16} color="var(--color-primario)" style={{ flexShrink: 0, marginTop: '2px' }} />
+                <p>
+                  <strong style={{ color: 'var(--texto-principal)' }}>Descripción legal ({codNormalizado}): </strong>
+                  {descOficial}
+                </p>
+              </div>
+            )
+          })()}
         </div>
       </div>
     </div>

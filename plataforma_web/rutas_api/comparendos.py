@@ -9,6 +9,10 @@ from sqlalchemy.orm import joinedload
 from base_datos.conexion import obtener_sesion_bd
 from base_datos.modelos import ComparendoORM
 from plataforma_web.utilidades_exportacion import generar_excel_resumen
+from agente_extraccion_simit.catalogo_infracciones import (
+    normalizar_codigo_infraccion,
+    asignar_descripcion_si_falta,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +113,9 @@ def serializar_comparendo(c: ComparendoORM) -> Dict[str, Any]:
 
     tipo_registro_final = "Multa" if es_multa else (c.tipo_registro or "Comparendo")
 
+    codigo_infraccion_canonico = normalizar_codigo_infraccion(c.codigo_infraccion) or c.codigo_infraccion
+    desc_infraccion_oficial = asignar_descripcion_si_falta(codigo_infraccion_canonico, c.descripcion_infraccion)
+
     return {
         "id": c.id,
         "numero_comparendo": c.numero_comparendo,
@@ -116,8 +123,8 @@ def serializar_comparendo(c: ComparendoORM) -> Dict[str, Any]:
         "placa": c.placa,
         "criterio_busqueda": c.criterio_busqueda,
         "tipo_registro": tipo_registro_final,
-        "codigo_infraccion": c.codigo_infraccion,
-        "descripcion_infraccion": c.descripcion_infraccion,
+        "codigo_infraccion": codigo_infraccion_canonico,
+        "descripcion_infraccion": desc_infraccion_oficial,
         "secretaria": c.secretaria,
         "direccion": c.direccion,
         "fuente_comparendo": getattr(c, "fuente_comparendo", "SIMIT"),

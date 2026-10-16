@@ -7,6 +7,7 @@ import { ModalGestionOperativa } from './ModalGestionOperativa'
 import { EtiquetaTooltip } from './EtiquetaTooltip'
 import { SelectorDesplegable } from './SelectorDesplegable'
 import { BotonExportarExcel } from './BotonExportarExcel'
+import { obtenerDescripcionInfraccion, normalizarCodigoInfraccion } from '../utilidades/catalogoInfracciones'
 
 export function TablaComparendos({
   busquedaExterna = '',
@@ -380,6 +381,7 @@ export function TablaComparendos({
             c.secretaria?.toLowerCase().includes(termino) ||
             c.criterio_busqueda?.toLowerCase().includes(termino) ||
             c.descripcion_infraccion?.toLowerCase().includes(termino) ||
+            obtenerDescripcionInfraccion(c.codigo_infraccion, c.descripcion_infraccion).toLowerCase().includes(termino) ||
             c.numero_resolucion?.toLowerCase().includes(termino)
           )
           if (!coincideTexto) return false
@@ -694,7 +696,7 @@ export function TablaComparendos({
                       )}
                     </td>
                     <td>
-                      <EtiquetaTooltip texto={c.descripcion_infraccion || `Infracción código ${c.codigo_infraccion}`}>
+                      <EtiquetaTooltip texto={obtenerDescripcionInfraccion(c.codigo_infraccion, c.descripcion_infraccion)}>
                         <strong
                           style={{
                             color: 'var(--color-primario)',
@@ -704,7 +706,7 @@ export function TablaComparendos({
                             textUnderlineOffset: '3px'
                           }}
                         >
-                          {c.codigo_infraccion}
+                          {normalizarCodigoInfraccion(c.codigo_infraccion) || c.codigo_infraccion}
                         </strong>
                       </EtiquetaTooltip>
                     </td>

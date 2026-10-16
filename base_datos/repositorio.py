@@ -104,6 +104,13 @@ class RepositorioBaseDatos:
                         .where(or_(*condiciones_cruce))
                     )
 
+            from agente_extraccion_simit.catalogo_infracciones import (
+                normalizar_codigo_infraccion,
+                asignar_descripcion_si_falta,
+            )
+            codigo_normalizado = normalizar_codigo_infraccion(comp.codigo_infraccion) or comp.codigo_infraccion
+            desc_infraccion_limpia = asignar_descripcion_si_falta(codigo_normalizado, comp.descripcion_infraccion)
+
             if not existente:
                 nuevo_orm = ComparendoORM(
                     numero_resolucion=comp.numero_resolucion,
@@ -113,8 +120,8 @@ class RepositorioBaseDatos:
                     fecha_infraccion=comp.fecha_infraccion,
                     fecha_notificacion=comp.fecha_notificacion,
                     fecha_resolucion=comp.fecha_resolucion,
-                    codigo_infraccion=comp.codigo_infraccion,
-                    descripcion_infraccion=comp.descripcion_infraccion,
+                    codigo_infraccion=codigo_normalizado,
+                    descripcion_infraccion=desc_infraccion_limpia,
                     secretaria=comp.secretaria,
                     direccion=comp.direccion,
                     fuente_comparendo=comp.fuente_comparendo,
@@ -161,8 +168,10 @@ class RepositorioBaseDatos:
                     existente.fecha_resolucion = comp.fecha_resolucion
                 if comp.secretaria:
                     existente.secretaria = comp.secretaria
-                if comp.descripcion_infraccion:
-                    existente.descripcion_infraccion = comp.descripcion_infraccion
+                if codigo_normalizado:
+                    existente.codigo_infraccion = codigo_normalizado
+                if desc_infraccion_limpia:
+                    existente.descripcion_infraccion = desc_infraccion_limpia
                 if comp.tipo_registro:
                     existente.tipo_registro = comp.tipo_registro
                 existente.fecha_limite_descuento_50 = comp.fecha_limite_descuento_50
