@@ -55,28 +55,47 @@ class AgenteOrquestadorComparendos:
         )
         logger.info(f"Sesión del Agente Orquestador inicializada con modelo: {self.modelo} (Temperatura: 0.0, Thinking: 0)")
 
-    def _podar_historial(self, max_mensajes: int = 6):
+    def _es_mensaje_usuario_real(self, contenido: Any) -> bool:
+        """Verifica si un objeto Content corresponde a una pregunta real del usuario y no a la respuesta de una función."""
+        if not contenido or getattr(contenido, "role", None) != "user":
+            return False
+        for parte in getattr(contenido, "parts", []) or []:
+            if getattr(parte, "function_response", None) is not None:
+                return False
+        return True
+
+    def _podar_historial(self, max_turnos_usuario: int = 3):
         """
-        Mantiene una ventana deslizante de los últimos turnos en memoria.
-        Evita el efecto bola de nieve que disparaba el costo de tokens acumulados.
+        Mantiene una ventana deslizante de turnos completos en memoria.
+        Garantiza que el historial siempre comience con una pregunta real del usuario
+        y nunca rompa la secuencia estricta de (llamada_a_funcion -> respuesta_de_funcion) de Gemini.
         """
         try:
-            curated = getattr(self.chat, "_curated_history", None)
-            comprehensive = getattr(self.chat, "_comprehensive_history", None)
-            if curated and len(curated) > max_mensajes:
-                podado = curated[-max_mensajes:]
-                while podado and podado[0].role != "user":
-                    podado = podado[1:]
-                self.chat._curated_history = podado
-                if comprehensive:
-                    self.chat._comprehensive_history = comprehensive[-len(podado):]
+            historial_curado = getattr(self.chat, "_curated_history", None)
+            if not historial_curado:
+                return
+
+            # Identificar los índices de los mensajes donde el usuario hizo una pregunta real
+            indices_turnos_usuario = [
+                i for i, c in enumerate(historial_curado)
+                if self._es_mensaje_usuario_real(c)
+            ]
+
+            # Si excedemos el límite de turnos conversacionales completos
+            if len(indices_turnos_usuario) > max_turnos_usuario:
+                indice_inicio = indices_turnos_usuario[-max_turnos_usuario]
+                historial_podado = list(historial_curado[indice_inicio:])
+                self.chat._curated_history = historial_podado
+                self.chat._comprehensive_history = list(historial_podado)
+                logger.info(f"Historial podado exitosamente. Se conservaron los últimos {max_turnos_usuario} turnos ({len(historial_podado)} elementos).")
         except Exception as e_poda:
             logger.warning(f"Aviso al podar historial de conversación: {e_poda}")
 
     def procesar_mensaje(self, mensaje_usuario: str) -> EsquemaRespuestaAgente:
         """
         Envía el mensaje del usuario al modelo Gemini, ejecuta las herramientas requeridas y retorna la respuesta.
-        Incluye reintento automático con backoff exponencial ante límites de tasa (429) o sobrecarga temporal del servidor (503).
+        Incluye reintento automático con backoff exponencial ante límites de tasa (429) o sobrecarga temporal del servidor (503),
+        y auto-recuperación si el historial llega a desincronizarse.
         """
         import time
         max_reintentos = 4
@@ -85,7 +104,7 @@ class AgenteOrquestadorComparendos:
             try:
                 logger.info(f"Usuario: '{mensaje_usuario}'")
                 respuesta = self.chat.send_message(mensaje_usuario)
-                self._podar_historial(max_mensajes=6)
+                self._podar_historial(max_turnos_usuario=3)
                 
                 texto = respuesta.text if respuesta.text else "No se generó texto de respuesta."
                 
@@ -103,6 +122,23 @@ class AgenteOrquestadorComparendos:
                     time.sleep(tiempo_espera)
                     continue
                 
+                # Si ocurre un error de desincronización de llamadas a función (400 INVALID_ARGUMENT),
+                # reiniciamos la sesión automáticamente para evitar que el agente quede bloqueado indefinidamente.
+                if "function response turn" in error_str or "INVALID_ARGUMENT" in error_str:
+                    logger.warning("Detectada desincronización en el historial de llamadas a función de Gemini. Reiniciando historial y recuperando sesión...")
+                    self.reiniciar_historial()
+                    if intento < max_reintentos:
+                        try:
+                            respuesta_recuperada = self.chat.send_message(mensaje_usuario)
+                            self._podar_historial(max_turnos_usuario=3)
+                            texto = respuesta_recuperada.text if respuesta_recuperada.text else "No se generó texto de respuesta."
+                            return EsquemaRespuestaAgente(
+                                texto_respuesta=texto,
+                                exitoso=True
+                            )
+                        except Exception as e_rec:
+                            logger.error(f"Fallo en reintento tras reiniciar historial: {e_rec}")
+
                 logger.error(f"Error procesando mensaje en Gemini: {e}")
                 return EsquemaRespuestaAgente(
                     texto_respuesta=f"Ocurrió un error al procesar tu solicitud con el Agente Inteligente: {str(e)}",
